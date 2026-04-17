@@ -31,3 +31,6 @@ test_parse2.py
 # OS
 Thumbs.db
 .DS_Store
+
+# Kiro
+.kiro/
