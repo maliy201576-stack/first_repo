@@ -1,0 +1,24 @@
+Metadata-Version: 2.4
+Name: glukhov-sales-engine
+Version: 0.1.0
+Summary: Automated lead collection system for GlukhovSystems
+Requires-Python: >=3.12
+Requires-Dist: fastapi>=0.115.0
+Requires-Dist: uvicorn>=0.30.0
+Requires-Dist: telethon>=1.36.0
+Requires-Dist: playwright>=1.45.0
+Requires-Dist: rapidfuzz>=3.9.0
+Requires-Dist: asyncpg>=0.29.0
+Requires-Dist: sqlalchemy[asyncio]>=2.0.0
+Requires-Dist: redis>=5.0.0
+Requires-Dist: pydantic>=2.0.0
+Requires-Dist: pydantic-settings>=2.0.0
+Requires-Dist: python-telegram-bot>=21.0
+Requires-Dist: beautifulsoup4>=4.12.0
+Provides-Extra: dev
+Requires-Dist: hypothesis>=6.100.0; extra == "dev"
+Requires-Dist: pytest>=8.0.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.23.0; extra == "dev"
+Requires-Dist: httpx>=0.27.0; extra == "dev"
+Requires-Dist: testcontainers>=4.0.0; extra == "dev"
+Requires-Dist: respx>=0.21.0; extra == "dev"
