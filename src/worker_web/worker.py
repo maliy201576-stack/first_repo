@@ -1,7 +1,7 @@
 """Worker_Web — periodic web scraper for freelance marketplaces and government procurement.
 
-Scrapes FL.ru, Kwork, Weblancer, and zakupki.gov.ru on configurable intervals,
-filters by category, handles HTTP errors with proxy rotation, and sends
+Scrapes FL.ru, Kwork, Weblancer, Profi.ru, and zakupki.gov.ru on configurable
+intervals, filters by category, handles HTTP errors with proxy rotation, and sends
 unique leads to DedupService.
 """
 
@@ -17,6 +17,7 @@ from src.notifier.service import Notifier
 from src.worker_web.parsers.base import ScrapedOrder
 from src.worker_web.parsers.fl_ru import FlRuParser
 from src.worker_web.parsers.kwork import KworkParser
+from src.worker_web.parsers.profi_ru import ProfiRuParser
 from src.worker_web.parsers.weblancer import WeblancerParser
 from src.worker_web.parsers.zakupki_gov import ZakupkiGovParser
 from src.worker_web.proxy_pool import ProxyPool, NoAvailableProxiesError
@@ -135,6 +136,7 @@ class WorkerWeb:
         self._kwork_parser = KworkParser()
         self._weblancer_parser = WeblancerParser()
         self._zakupki_parser = ZakupkiGovParser()
+        self._profi_ru_parser = ProfiRuParser()
 
     async def start(self) -> None:
         """Launch periodic scraping tasks for all sources."""
@@ -152,11 +154,15 @@ class WorkerWeb:
                 self._periodic_scrape("weblancer", self.scrape_weblancer, self._intervals["fl_ru"])
             ),
             asyncio.create_task(
+                self._periodic_scrape("profi_ru", self.scrape_profi_ru, self._intervals["fl_ru"])
+            ),
+            asyncio.create_task(
                 self._periodic_scrape("zakupki", self.scrape_zakupki, self._intervals["zakupki"])
             ),
         ]
         logger.info(
-            "WorkerWeb started: fl_ru=%ds, kwork=%ds, weblancer=%ds, zakupki=%ds",
+            "WorkerWeb started: fl_ru=%ds, kwork=%ds, weblancer=%ds, profi_ru=%ds, zakupki=%ds",
+            self._intervals["fl_ru"],
             self._intervals["fl_ru"],
             self._intervals["fl_ru"],
             self._intervals["fl_ru"],
@@ -193,6 +199,10 @@ class WorkerWeb:
     async def scrape_weblancer(self) -> list[ScrapedOrder]:
         """Scrape Weblancer.net, filter by keywords, and send leads to DedupService."""
         return await self._scrape_source("weblancer", self._weblancer_parser)
+
+    async def scrape_profi_ru(self) -> list[ScrapedOrder]:
+        """Scrape Profi.ru IT freelance orders, filter, and send leads to DedupService."""
+        return await self._scrape_source("profi.ru", self._profi_ru_parser)
 
     async def scrape_zakupki(self) -> list[ScrapedOrder]:
         """Scrape zakupki.gov.ru, filter by category, and send leads to DedupService."""

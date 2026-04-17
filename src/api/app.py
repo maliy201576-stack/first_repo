@@ -9,6 +9,7 @@ from src.common.db import create_engine, create_session_factory
 
 from src.api.routes.health import router as health_router
 from src.api.routes.leads import router as leads_router
+from src.api.routes.ui import router as ui_router
 
 
 @asynccontextmanager
@@ -27,3 +28,4 @@ app = FastAPI(title="Glukhov Sales Engine API", version="0.1.0", lifespan=lifesp
 
 app.include_router(health_router)
 app.include_router(leads_router, prefix="/api/v1")
+app.include_router(ui_router)

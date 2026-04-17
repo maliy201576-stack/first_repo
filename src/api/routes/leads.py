@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from sqlalchemy import func, select
+from sqlalchemy import cast, func, select, String
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.common.db import Lead
@@ -35,14 +35,57 @@ def _lead_to_response(lead: Lead) -> LeadResponse:
     )
 
 
+def _apply_filters(query, *, source, status, tags, category, keyword, okpd2, date_from, date_to):
+    """Apply optional WHERE clauses to a query.
+
+    Args:
+        query: SQLAlchemy select statement.
+        source: Filter by lead source.
+        status: Filter by lead status.
+        tags: Filter by tag (JSONB contains).
+        category: Filter by category (exact match).
+        keyword: Filter by matched keyword (JSONB contains).
+        okpd2: Filter by OKPD2 code (JSONB text search).
+        date_from: Filter leads created on or after this date.
+        date_to: Filter leads created on or before this date.
+
+    Returns:
+        Modified query with filters applied.
+    """
+    if source is not None:
+        query = query.where(Lead.source == source)
+    if status is not None:
+        query = query.where(Lead.status == status)
+    if tags is not None:
+        query = query.where(Lead.tags.contains([tags]))
+    if category is not None:
+        query = query.where(Lead.category == category)
+    if keyword is not None:
+        query = query.where(Lead.matched_keywords.contains([keyword]))
+    if okpd2 is not None:
+        query = query.where(
+            cast(Lead.okpd2_codes, String).ilike(f"%{okpd2}%")
+        )
+    if date_from is not None:
+        query = query.where(Lead.created_at >= date_from)
+    if date_to is not None:
+        query = query.where(Lead.created_at <= date_to)
+    return query
+
+
 @router.get("/leads", response_model=LeadListResponse)
 async def list_leads(
     request: Request,
     source: str | None = Query(None),
     status: str | None = Query(None),
     tags: str | None = Query(None),
+    category: str | None = Query(None),
+    keyword: str | None = Query(None),
+    okpd2: str | None = Query(None),
     date_from: datetime | None = Query(None),
     date_to: datetime | None = Query(None),
+    sort_by: str = Query("created_at"),
+    sort_dir: str = Query("desc"),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
 ) -> LeadListResponse:
@@ -50,29 +93,30 @@ async def list_leads(
     session_factory = request.app.state.async_session_factory
     try:
         async with session_factory() as session:
-            query = select(Lead)
-            count_query = select(func.count()).select_from(Lead)
-
-            if source is not None:
-                query = query.where(Lead.source == source)
-                count_query = count_query.where(Lead.source == source)
-            if status is not None:
-                query = query.where(Lead.status == status)
-                count_query = count_query.where(Lead.status == status)
-            if tags is not None:
-                query = query.where(Lead.tags.contains([tags]))
-                count_query = count_query.where(Lead.tags.contains([tags]))
-            if date_from is not None:
-                query = query.where(Lead.created_at >= date_from)
-                count_query = count_query.where(Lead.created_at >= date_from)
-            if date_to is not None:
-                query = query.where(Lead.created_at <= date_to)
-                count_query = count_query.where(Lead.created_at <= date_to)
+            filt = dict(
+                source=source, status=status, tags=tags, category=category,
+                keyword=keyword, okpd2=okpd2, date_from=date_from, date_to=date_to,
+            )
+            query = _apply_filters(select(Lead), **filt)
+            count_query = _apply_filters(
+                select(func.count()).select_from(Lead), **filt
+            )
 
             total = (await session.execute(count_query)).scalar_one()
 
+            # Sorting
+            _allowed_sort = {
+                "created_at": Lead.created_at,
+                "discovered_at": Lead.discovered_at,
+                "budget": Lead.budget,
+                "title": Lead.title,
+                "source": Lead.source,
+            }
+            sort_col = _allowed_sort.get(sort_by, Lead.created_at)
+            order = sort_col.asc() if sort_dir == "asc" else sort_col.desc()
+
             offset = (page - 1) * per_page
-            query = query.order_by(Lead.created_at.desc()).offset(offset).limit(per_page)
+            query = query.order_by(order).offset(offset).limit(per_page)
             result = await session.execute(query)
             leads = result.scalars().all()
 
@@ -122,5 +166,41 @@ async def update_lead(
             return _lead_to_response(lead)
     except HTTPException:
         raise
+    except SQLAlchemyError:
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/leads-filter-options")
+async def filter_options(request: Request) -> dict:
+    """Return distinct values for filter dropdowns in the web UI."""
+    session_factory = request.app.state.async_session_factory
+    try:
+        async with session_factory() as session:
+            sources = (
+                await session.execute(
+                    select(Lead.source).distinct().order_by(Lead.source)
+                )
+            ).scalars().all()
+
+            statuses = (
+                await session.execute(
+                    select(Lead.status).distinct().order_by(Lead.status)
+                )
+            ).scalars().all()
+
+            categories = (
+                await session.execute(
+                    select(Lead.category)
+                    .where(Lead.category.isnot(None))
+                    .distinct()
+                    .order_by(Lead.category)
+                )
+            ).scalars().all()
+
+            return {
+                "sources": sources,
+                "statuses": statuses,
+                "categories": categories,
+            }
     except SQLAlchemyError:
         raise HTTPException(status_code=500, detail="Internal server error")

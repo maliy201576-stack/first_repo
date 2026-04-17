@@ -9,6 +9,8 @@ from bs4 import BeautifulSoup
 from src.worker_web.parsers.base import ScrapedOrder, is_urgent_deadline
 from src.worker_web.parsers.fl_ru import FlRuParser
 from src.worker_web.parsers.habr_freelance import HabrFreelanceParser
+from src.worker_web.parsers.kwork import KworkParser
+from src.worker_web.parsers.profi_ru import ProfiRuParser
 from src.worker_web.parsers.zakupki_gov import ZakupkiGovParser
 
 
@@ -403,3 +405,319 @@ class TestZakupkiGovParserEdgeCases:
         assert order.max_contract_price is None
         assert order.title == "Закупка без цены"
         assert order.okpd2_codes == ["62.01.11.000"]
+
+
+# ---------------------------------------------------------------------------
+# ProfiRuParser HTML parsing tests
+# ---------------------------------------------------------------------------
+
+_PROFI_RU_ORDER_HTML = """
+<div class="order-card">
+  <div>Дистанционно · вчера, 15:24</div>
+  <h4>Landing page</h4>
+  <div>Детали задачи</div>
+  <div>
+    Лендинг.
+    Платформа: по рекомендации специалиста.
+    Функционал сайта: калькулятор стоимости.
+    Контента нет
+  </div>
+  <div>Стоимость</div>
+  <div>8000 ₽</div>
+</div>
+"""
+
+_PROFI_RU_ORDER_NO_BUDGET_HTML = """
+<div class="order-card">
+  <div>Дистанционно · 12 апреля 2026, 22:18</div>
+  <h4>Корпоративный сайт</h4>
+  <div>Детали задачи</div>
+  <div>
+    Корпоративный сайт (сайт компании).
+    Платформа: по рекомендации специалиста.
+    Функционал сайта: многостраничный с ценами и обратным звонком.
+    Контент есть
+  </div>
+</div>
+"""
+
+_PROFI_RU_MULTIPLE_ORDERS_HTML = """
+<div>
+  <div class="order-card">
+    <div>Дистанционно · вчера, 15:24</div>
+    <h4>Landing page</h4>
+    <div>Детали задачи</div>
+    <div>Лендинг. Платформа: Tilda.</div>
+    <div>Стоимость</div>
+    <div>8000 ₽</div>
+  </div>
+  <div class="order-card">
+    <div>Дистанционно · 12 апреля 2026, 20:41</div>
+    <h4>Создание сайта-визитки</h4>
+    <div>Детали задачи</div>
+    <div>Сайт-визитка. Платформа: по рекомендации специалиста.</div>
+  </div>
+  <div class="order-card">
+    <div>Дистанционно · 12 апреля 2026, 17:15</div>
+    <h4>Создание сайта-визитки</h4>
+    <div>Детали задачи</div>
+    <div>Сайт-визитка. Платформа: Tilda.</div>
+    <div>Стоимость</div>
+    <div>4000 ₽</div>
+  </div>
+</div>
+"""
+
+_PROFI_RU_ORDER_WITH_DATE_HTML = """
+<div class="order-card">
+  <div>Дистанционно · 12 апреля 2026, 18:36</div>
+  <h4>Создание интернет-магазина</h4>
+  <div>Детали задачи</div>
+  <div>
+    Интернет-магазин.
+    Платформа: Tilda.
+    Количество карточек товаров: 100.
+    Контент есть
+  </div>
+  <div>Стоимость</div>
+  <div>40000 ₽</div>
+</div>
+"""
+
+
+class TestProfiRuParser:
+    """Tests for ProfiRuParser HTML extraction methods."""
+
+    def test_extract_orders_with_detail_markers(self) -> None:
+        """Orders with 'Детали задачи' markers should be extracted."""
+        parser = ProfiRuParser()
+        soup = BeautifulSoup(_PROFI_RU_ORDER_HTML, "html.parser")
+        orders = parser._extract_orders(soup)
+        assert len(orders) >= 1
+        order = orders[0]
+        assert order.source == "profi.ru"
+        assert "Landing" in order.title or "page" in order.title
+        assert order.budget == Decimal("8000")
+        assert order.category == "IT"
+
+    def test_extract_orders_no_budget(self) -> None:
+        """Orders without a price should have budget=None."""
+        parser = ProfiRuParser()
+        soup = BeautifulSoup(_PROFI_RU_ORDER_NO_BUDGET_HTML, "html.parser")
+        orders = parser._extract_orders(soup)
+        assert len(orders) >= 1
+        order = orders[0]
+        assert order.budget is None
+        assert "Корпоративный" in order.title or "сайт" in order.title
+
+    def test_extract_date_russian_format(self) -> None:
+        """Russian date like '12 апреля 2026' should be parsed correctly."""
+        parser = ProfiRuParser()
+        soup = BeautifulSoup(_PROFI_RU_ORDER_WITH_DATE_HTML, "html.parser")
+        orders = parser._extract_orders(soup)
+        assert len(orders) >= 1
+        order = orders[0]
+        assert order.published_at.year == 2026
+        assert order.published_at.month == 4
+        assert order.published_at.day == 12
+
+    def test_extract_budget_with_ruble_sign(self) -> None:
+        """Budget extraction should handle '₽' currency symbol."""
+        parser = ProfiRuParser()
+        soup = BeautifulSoup(_PROFI_RU_ORDER_WITH_DATE_HTML, "html.parser")
+        orders = parser._extract_orders(soup)
+        assert len(orders) >= 1
+        assert orders[0].budget == Decimal("40000")
+
+    def test_empty_html_returns_no_orders(self) -> None:
+        """Empty or irrelevant HTML should return an empty list."""
+        parser = ProfiRuParser()
+        soup = BeautifulSoup("<div><p>Nothing here</p></div>", "html.parser")
+        orders = parser._extract_orders(soup)
+        assert orders == []
+
+    def test_missing_title_skips_order(self) -> None:
+        """An order card without a recognizable title should be skipped."""
+        html = """
+        <div>
+          <div>Детали задачи</div>
+          <div>₽</div>
+        </div>
+        """
+        parser = ProfiRuParser()
+        soup = BeautifulSoup(html, "html.parser")
+        orders = parser._extract_orders(soup)
+        assert orders == []
+
+
+class TestProfiRuParserEdgeCases:
+    """Edge-case tests for ProfiRuParser."""
+
+    def test_multiple_orders_extracted(self) -> None:
+        """Multiple order cards on a page should all be extracted."""
+        parser = ProfiRuParser()
+        soup = BeautifulSoup(_PROFI_RU_MULTIPLE_ORDERS_HTML, "html.parser")
+        orders = parser._extract_orders(soup)
+        assert len(orders) >= 2
+        titles = [o.title for o in orders]
+        # At least one should contain "Landing" and one "визитки"
+        assert any("Landing" in t for t in titles)
+        assert any("визитки" in t or "Создание" in t for t in titles)
+
+    def test_extract_budget_with_spaces(self) -> None:
+        """Budget like '40 000 ₽' with spaces should be parsed correctly."""
+        html = """
+        <div>
+          <h4>Test order</h4>
+          <div>Детали задачи</div>
+          <div>Some description text here.</div>
+          <div>Стоимость</div>
+          <div>40 000 ₽</div>
+        </div>
+        """
+        parser = ProfiRuParser()
+        soup = BeautifulSoup(html, "html.parser")
+        orders = parser._extract_orders(soup)
+        assert len(orders) >= 1
+        assert orders[0].budget == Decimal("40000")
+
+    def test_fallback_extraction_via_cost_marker(self) -> None:
+        """When no 'Детали задачи' marker exists, fallback to 'Стоимость'."""
+        html = """
+        <div>
+          <h4>Разработка сайта</h4>
+          <div>Нужен сайт для бизнеса с каталогом товаров.</div>
+          <div>Стоимость</div>
+          <div>15000 ₽</div>
+        </div>
+        """
+        parser = ProfiRuParser()
+        soup = BeautifulSoup(html, "html.parser")
+        orders = parser._extract_orders(soup)
+        assert len(orders) >= 1
+        assert orders[0].budget == Decimal("15000")
+
+    def test_source_is_profi_ru(self) -> None:
+        """All extracted orders should have source='profi.ru'."""
+        parser = ProfiRuParser()
+        soup = BeautifulSoup(_PROFI_RU_ORDER_HTML, "html.parser")
+        orders = parser._extract_orders(soup)
+        for order in orders:
+            assert order.source == "profi.ru"
+
+    def test_category_is_it(self) -> None:
+        """All extracted orders should have category='IT'."""
+        parser = ProfiRuParser()
+        soup = BeautifulSoup(_PROFI_RU_ORDER_HTML, "html.parser")
+        orders = parser._extract_orders(soup)
+        for order in orders:
+            assert order.category == "IT"
+
+
+# ---------------------------------------------------------------------------
+# KworkParser HTML parsing tests
+# ---------------------------------------------------------------------------
+
+_KWORK_BUDGET_HTML = """
+<div class="want-card">
+  <a class="wants-card__header-title" href="/projects/3154306">
+    Импорт каталога для интернет-магазина
+  </a>
+  <div class="wants-card__description-text">Нужна внедрить каталог</div>
+  <div>Желаемый бюджет: до 25 000 ₽ Допустимый: до 75 000 ₽</div>
+</div>
+"""
+
+_KWORK_FIXED_PRICE_HTML = """
+<div class="want-card">
+  <a class="wants-card__header-title" href="/projects/3154300">
+    Сверстать страницу по макету в фигме
+  </a>
+  <div class="wants-card__description-text">Необходимо сверстать</div>
+  <div>Цена 500 ₽</div>
+</div>
+"""
+
+_KWORK_NO_BUDGET_HTML = """
+<div class="want-card">
+  <a class="wants-card__header-title" href="/projects/999">
+    Проект без бюджета
+  </a>
+  <div class="wants-card__description-text">Описание проекта</div>
+</div>
+"""
+
+_KWORK_LEGACY_PRICE_HTML = """
+<div class="want-card">
+  <a class="wants-card__header-title" href="/projects/100">
+    Проект с legacy ценой
+  </a>
+  <div class="wants-card__description-text">Описание</div>
+  <div class="wants-card__header-price">15 000 руб.</div>
+</div>
+"""
+
+
+class TestKworkParser:
+    """Tests for KworkParser budget extraction from various HTML formats."""
+
+    def test_extract_budget_desired_format(self) -> None:
+        """'Желаемый бюджет: до 25 000 ₽' should extract 25000."""
+        parser = KworkParser()
+        soup = BeautifulSoup(_KWORK_BUDGET_HTML, "html.parser")
+        item = soup.select_one("div.want-card")
+        assert item is not None
+        order = parser._parse_item(item)
+        assert order is not None
+        assert order.budget == Decimal("25000")
+        assert order.title == "Импорт каталога для интернет-магазина"
+
+    def test_extract_budget_fixed_price(self) -> None:
+        """'Цена 500 ₽' should extract 500."""
+        parser = KworkParser()
+        soup = BeautifulSoup(_KWORK_FIXED_PRICE_HTML, "html.parser")
+        item = soup.select_one("div.want-card")
+        assert item is not None
+        order = parser._parse_item(item)
+        assert order is not None
+        assert order.budget == Decimal("500")
+
+    def test_no_budget_returns_none(self) -> None:
+        """Card without any price text should have budget=None."""
+        parser = KworkParser()
+        soup = BeautifulSoup(_KWORK_NO_BUDGET_HTML, "html.parser")
+        item = soup.select_one("div.want-card")
+        assert item is not None
+        order = parser._parse_item(item)
+        assert order is not None
+        assert order.budget is None
+
+    def test_legacy_price_element(self) -> None:
+        """Legacy CSS selector div.wants-card__header-price should still work."""
+        parser = KworkParser()
+        soup = BeautifulSoup(_KWORK_LEGACY_PRICE_HTML, "html.parser")
+        item = soup.select_one("div.want-card")
+        assert item is not None
+        order = parser._parse_item(item)
+        assert order is not None
+        assert order.budget == Decimal("15000")
+
+    def test_url_construction(self) -> None:
+        """Relative href should be prefixed with https://kwork.ru."""
+        parser = KworkParser()
+        soup = BeautifulSoup(_KWORK_BUDGET_HTML, "html.parser")
+        item = soup.select_one("div.want-card")
+        assert item is not None
+        order = parser._parse_item(item)
+        assert order is not None
+        assert order.url == "https://kwork.ru/projects/3154306"
+
+    def test_source_is_kwork(self) -> None:
+        """All Kwork orders should have source='kwork.ru'."""
+        parser = KworkParser()
+        soup = BeautifulSoup(_KWORK_BUDGET_HTML, "html.parser")
+        item = soup.select_one("div.want-card")
+        assert item is not None
+        order = parser._parse_item(item)
+        assert order is not None
+        assert order.source == "kwork.ru"

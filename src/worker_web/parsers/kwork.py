@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
@@ -14,6 +15,20 @@ logger = logging.getLogger(__name__)
 
 _KWORK_PROJECTS_URL = "https://kwork.ru/projects"
 _MAX_PAGES = 7
+
+# Regex patterns for budget extraction from card text.
+# "Желаемый бюджет: до 25 000 ₽" or "Цена 500 ₽"
+_RE_BUDGET = re.compile(
+    r"(?:"
+    r"(?:Желаемый\s+бюджет|бюджет)\s*[:]\s*(?:до\s+)?"
+    r"|Цена\s+"
+    r")"
+    r"([\d\s\xa0]+)"
+    r"\s*₽",
+    re.IGNORECASE,
+)
+# Fallback: any number followed by ₽
+_RE_PRICE_SIMPLE = re.compile(r"([\d\s\xa0]+)\s*₽")
 
 
 class KworkParser:
@@ -111,17 +126,58 @@ class KworkParser:
 
     @staticmethod
     def _extract_budget(item: Tag) -> Decimal | None:
-        """Extract budget from a Kwork project card."""
+        """Extract budget from a Kwork project card.
+
+        Kwork renders budget in two formats within the card text:
+        - "Желаемый бюджет: до 25 000 ₽" (desired budget)
+        - "Цена 500 ₽" (fixed price)
+
+        The method first tries CSS selectors for the price element,
+        then falls back to regex search over the full card text.
+
+        Args:
+            item: The card DOM element.
+
+        Returns:
+            Budget as Decimal, or None if not found.
+        """
+        # Strategy 1: Try dedicated price element (legacy selectors)
         price_tag = item.select_one("div.wants-card__header-price")
         if price_tag is None:
             price_tag = item.select_one("span[class*='price']")
-        if price_tag is None:
-            return None
-        text = price_tag.get_text(strip=True).replace("\xa0", "").replace(" ", "")
-        digits = "".join(ch for ch in text if ch.isdigit() or ch == ".")
-        if not digits:
-            return None
-        try:
-            return Decimal(digits)
-        except InvalidOperation:
-            return None
+        if price_tag is not None:
+            result = _parse_price_text(price_tag.get_text(strip=True))
+            if result is not None:
+                return result
+
+        # Strategy 2: Search full card text for budget/price patterns
+        full_text = item.get_text()
+        match = _RE_BUDGET.search(full_text)
+        if match:
+            return _parse_price_text(match.group(1))
+
+        # Strategy 3: Fallback — first occurrence of "N ₽"
+        match = _RE_PRICE_SIMPLE.search(full_text)
+        if match:
+            return _parse_price_text(match.group(1))
+
+        return None
+
+
+def _parse_price_text(text: str) -> Decimal | None:
+    """Parse a price string like '25 000' or '500' into a Decimal.
+
+    Args:
+        text: Raw price text, possibly with spaces and non-breaking spaces.
+
+    Returns:
+        Decimal value, or None if parsing fails.
+    """
+    cleaned = text.replace("\xa0", "").replace(" ", "").replace(",", ".")
+    digits = "".join(ch for ch in cleaned if ch.isdigit() or ch == ".")
+    if not digits:
+        return None
+    try:
+        return Decimal(digits)
+    except InvalidOperation:
+        return None

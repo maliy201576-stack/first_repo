@@ -171,7 +171,7 @@ class TestWorkerWebLifecycle:
         worker = WorkerWeb(dedup, pool, factory)
         await worker.start()
 
-        assert len(worker._tasks) == 3
+        assert len(worker._tasks) == 5
         assert all(isinstance(t, asyncio.Task) for t in worker._tasks)
         assert worker._running is True
 
@@ -364,9 +364,9 @@ class TestWorkerWebErrorHandling:
 
         worker = WorkerWeb(dedup, pool, factory)
         worker._browser = browser
-        worker._habr_parser.parse = AsyncMock(side_effect=RuntimeError("network error"))
+        worker._profi_ru_parser.parse = AsyncMock(side_effect=RuntimeError("network error"))
 
-        result = await worker.scrape_habr_freelance()
+        result = await worker.scrape_profi_ru()
 
         assert result == []
 
@@ -466,10 +466,10 @@ class TestWorkerWebHttp429Handling:
 
         worker = WorkerWeb(dedup, pool, factory)
         worker._browser = browser
-        worker._habr_parser.parse = AsyncMock(side_effect=_Http429Error("rate limited"))
+        worker._profi_ru_parser.parse = AsyncMock(side_effect=_Http429Error("rate limited"))
 
         with patch("src.worker_web.worker.asyncio.sleep", new_callable=AsyncMock):
-            result = await worker.scrape_habr_freelance()
+            result = await worker.scrape_profi_ru()
 
         assert result == []
         # Dedup should never be called since no orders were parsed
@@ -564,11 +564,11 @@ class TestWorkerWebHttp403Handling:
         worker._browser = browser
 
         # Both attempts fail
-        worker._habr_parser.parse = AsyncMock(
+        worker._profi_ru_parser.parse = AsyncMock(
             side_effect=[_Http403Error("forbidden"), RuntimeError("retry also failed")]
         )
 
-        result = await worker.scrape_habr_freelance()
+        result = await worker.scrape_profi_ru()
 
         assert result == []
         pool.mark_blocked.assert_awaited_once_with("http://proxy1:8080")

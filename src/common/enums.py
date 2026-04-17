@@ -15,6 +15,7 @@ class LeadSource(str, Enum):
     FL_RU = "fl.ru"
     HABR_FREELANCE = "habr_freelance"
     ZAKUPKI_GOV = "zakupki_gov"
+    PROFI_RU = "profi.ru"
 
 
 class LeadTag(str, Enum):
