@@ -2,9 +2,26 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+
+# UI noise phrases scraped from source sites that should be stripped
+_NOISE_PHRASES = [
+    "Показать полностью",
+    "Показать ещё",
+    "Показать еще",
+    "Свернуть",
+    "Скрыть",
+    "Читать далее",
+    "Подробнее",
+    "ещё",
+]
+_NOISE_RE = re.compile(
+    r"\s*(?:" + "|".join(re.escape(p) for p in _NOISE_PHRASES) + r")\s*",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -60,3 +77,21 @@ def is_urgent_deadline(
         current += timedelta(days=1)
 
     return business_days < 3
+
+
+def clean_description(text: str) -> str:
+    """Remove UI noise phrases from scraped description text.
+
+    Strips phrases like "Показать полностью", "Свернуть", etc.
+    that are part of the source site UI, not the actual content.
+
+    Args:
+        text: Raw description text from a parser.
+
+    Returns:
+        Cleaned description string.
+    """
+    cleaned = _NOISE_RE.sub(" ", text)
+    # Collapse multiple spaces
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    return cleaned.strip()

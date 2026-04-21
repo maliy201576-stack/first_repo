@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation
 
 from bs4 import BeautifulSoup, Tag
 
-from src.worker_web.parsers.base import ScrapedOrder
+from src.worker_web.parsers.base import ScrapedOrder, clean_description
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +149,7 @@ class KworkParser:
             and "Нанято" not in ln
         ]
         description = " ".join(desc_lines[:3]) if desc_lines else ""
+        description = clean_description(description)
 
         budget = self._extract_budget(container)
 
@@ -184,8 +185,8 @@ class KworkParser:
         if desc_tag is None:
             desc_tag = item.select_one("div[class*='description']")
         description = desc_tag.get_text(strip=True) if desc_tag else ""
+        description = clean_description(description)
 
-        # Budget
         budget = self._extract_budget(item)
 
         return ScrapedOrder(

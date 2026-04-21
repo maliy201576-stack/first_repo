@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 
 from bs4 import BeautifulSoup, Tag
 
-from src.worker_web.parsers.base import ScrapedOrder
+from src.worker_web.parsers.base import ScrapedOrder, clean_description
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,7 @@ class FlRuParser:
 
         desc_tag = item.select_one("div.b-post__txt")
         description = desc_tag.get_text(strip=True) if desc_tag else ""
+        description = clean_description(description)
 
         budget = self._extract_budget(item)
         category = self._extract_category(item)

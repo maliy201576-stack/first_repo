@@ -148,6 +148,7 @@ def _js() -> str:
     return f"""<script>
 const A='/api/v1',NC=7;let cp=1;const pp=30;
 let sortBy='created_at',sortDir='desc';
+const SL={{'new':'\\u041D\\u043E\\u0432\\u0430\\u044F','viewed':'\\u041F\\u0440\\u043E\\u0441\\u043C\\u043E\\u0442\\u0440\\u0435\\u043D\\u043E','in_progress':'\\u0412 \\u0440\\u0430\\u0431\\u043E\\u0442\\u0435','rejected':'\\u041E\\u0442\\u043A\\u043B\\u043E\\u043D\\u0435\\u043D\\u043E'}};
 async function lo(){{try{{const r=await fetch(A+'/leads-filter-options');const d=await r.json();
 fsl('fs',d.sources||[]);fsl('ft',d.statuses||[]);fsl('fc',d.categories||[]);}}catch(e){{console.error(e)}}}}
 function fsl(id,vs){{const s=document.getElementById(id);const c=s.value;
@@ -181,8 +182,8 @@ const hasExtra=desc.length>120||extra;
 return '<tr>'+
 '<td><span class="b b-src">'+e(l.source)+'</span></td>'+
 '<td><select class="ss" onchange="us(\\''+l.id+'\\',this.value)">'+
-['new','viewed','in_progress','rejected'].map(s=>
-'<option value="'+s+'"'+(l.status===s?' selected':'')+'>'+s+'</option>').join('')+
+Object.keys(SL).map(s=>
+'<option value="'+s+'"'+(l.status===s?' selected':'')+'>'+(SL[s])+'</option>').join('')+
 '</select></td>'+
 '<td>'+(l.url?'<a class="ul" href="'+e(l.url)+'" target="_blank">'+e(l.title)+'</a>':e(l.title))+'</td>'+
 '<td><div class="dc">'+
