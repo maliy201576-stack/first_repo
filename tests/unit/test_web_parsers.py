@@ -409,210 +409,109 @@ class TestZakupkiGovParserEdgeCases:
 
 
 # ---------------------------------------------------------------------------
-# ProfiRuParser HTML parsing tests
+# ProfiRuParser text-based parsing tests
 # ---------------------------------------------------------------------------
 
-_PROFI_RU_ORDER_HTML = """
-<div class="order-card">
-  <div>Дистанционно · вчера, 15:24</div>
-  <h4>Landing page</h4>
-  <div>Детали задачи</div>
-  <div>
-    Лендинг.
-    Платформа: по рекомендации специалиста.
-    Функционал сайта: калькулятор стоимости.
-    Контента нет
-  </div>
-  <div>Стоимость</div>
-  <div>8000 ₽</div>
-</div>
+_PROFI_TEXT_SINGLE = """
+Прямо сейчас ищут
+Дистанционно
+· 15 апреля 2026, 00:21
+Программисты
+Детали задачи
+Работа с гугл ии, open code,.
+Доработка существующего продукта
+Стоимость
+40000 ₽
+Заказы за последние 6 месяцев
 """
 
-_PROFI_RU_ORDER_NO_BUDGET_HTML = """
-<div class="order-card">
-  <div>Дистанционно · 12 апреля 2026, 22:18</div>
-  <h4>Корпоративный сайт</h4>
-  <div>Детали задачи</div>
-  <div>
-    Корпоративный сайт (сайт компании).
-    Платформа: по рекомендации специалиста.
-    Функционал сайта: многостраничный с ценами и обратным звонком.
-    Контент есть
-  </div>
-</div>
+_PROFI_TEXT_MULTIPLE = """
+Прямо сейчас ищут
+Дистанционно
+· 4 часа назад
+Программисты 1С
+Детали задачи
+Доработать.
+Конфигурация 1С: Управление нашей фирмой.
+Версия: 8.3.
+Стоимость
+12000 ₽
+Дистанционно
+· 15 часов назад
+Программисты 1С
+Детали задачи
+Обучить работе с 1С.
+Конфигурация 1С: Френчи нужны.
+Версия: 8.3.
+Стоимость
+6000 ₽
+Дистанционно
+· 18 часов назад
+Программисты 1С
+Детали задачи
+Доработать.
+Конфигурация 1С: Управление торговлей.
+Версия: 8.3.
+Стоимость
+320000 ₽
+Заказы за последние 6 месяцев
 """
 
-_PROFI_RU_MULTIPLE_ORDERS_HTML = """
-<div>
-  <div class="order-card">
-    <div>Дистанционно · вчера, 15:24</div>
-    <h4>Landing page</h4>
-    <div>Детали задачи</div>
-    <div>Лендинг. Платформа: Tilda.</div>
-    <div>Стоимость</div>
-    <div>8000 ₽</div>
-  </div>
-  <div class="order-card">
-    <div>Дистанционно · 12 апреля 2026, 20:41</div>
-    <h4>Создание сайта-визитки</h4>
-    <div>Детали задачи</div>
-    <div>Сайт-визитка. Платформа: по рекомендации специалиста.</div>
-  </div>
-  <div class="order-card">
-    <div>Дистанционно · 12 апреля 2026, 17:15</div>
-    <h4>Создание сайта-визитки</h4>
-    <div>Детали задачи</div>
-    <div>Сайт-визитка. Платформа: Tilda.</div>
-    <div>Стоимость</div>
-    <div>4000 ₽</div>
-  </div>
-</div>
-"""
-
-_PROFI_RU_ORDER_WITH_DATE_HTML = """
-<div class="order-card">
-  <div>Дистанционно · 12 апреля 2026, 18:36</div>
-  <h4>Создание интернет-магазина</h4>
-  <div>Детали задачи</div>
-  <div>
-    Интернет-магазин.
-    Платформа: Tilda.
-    Количество карточек товаров: 100.
-    Контент есть
-  </div>
-  <div>Стоимость</div>
-  <div>40000 ₽</div>
-</div>
+_PROFI_TEXT_NO_BUDGET = """
+Прямо сейчас ищут
+Дистанционно
+· 18 часов назад
+Программисты 1С
+Детали задачи
+Перенести данные.
+Конфигурация 1С: 1с Хеликс Стоматология.
+Версия: 8.3.
+Перенести базу из 1с Хеликс Стоматология в 1с Медицина
+Заказы за последние 6 месяцев
 """
 
 
 class TestProfiRuParser:
-    """Tests for ProfiRuParser HTML extraction methods."""
-
-    def test_extract_orders_with_detail_markers(self) -> None:
-        """Orders with 'Детали задачи' markers should be extracted."""
+    def test_extract_single_order(self) -> None:
         parser = ProfiRuParser()
-        soup = BeautifulSoup(_PROFI_RU_ORDER_HTML, "html.parser")
-        orders = parser._extract_orders(soup)
-        assert len(orders) >= 1
-        order = orders[0]
-        assert order.source == "profi.ru"
-        assert "Landing" in order.title or "page" in order.title
-        assert order.budget == Decimal("8000")
-        assert order.category == "IT"
-
-    def test_extract_orders_no_budget(self) -> None:
-        """Orders without a price should have budget=None."""
-        parser = ProfiRuParser()
-        soup = BeautifulSoup(_PROFI_RU_ORDER_NO_BUDGET_HTML, "html.parser")
-        orders = parser._extract_orders(soup)
-        assert len(orders) >= 1
-        order = orders[0]
-        assert order.budget is None
-        assert "Корпоративный" in order.title or "сайт" in order.title
-
-    def test_extract_date_russian_format(self) -> None:
-        """Russian date like '12 апреля 2026' should be parsed correctly."""
-        parser = ProfiRuParser()
-        soup = BeautifulSoup(_PROFI_RU_ORDER_WITH_DATE_HTML, "html.parser")
-        orders = parser._extract_orders(soup)
-        assert len(orders) >= 1
-        order = orders[0]
-        assert order.published_at.year == 2026
-        assert order.published_at.month == 4
-        assert order.published_at.day == 12
-
-    def test_extract_budget_with_ruble_sign(self) -> None:
-        """Budget extraction should handle '₽' currency symbol."""
-        parser = ProfiRuParser()
-        soup = BeautifulSoup(_PROFI_RU_ORDER_WITH_DATE_HTML, "html.parser")
-        orders = parser._extract_orders(soup)
-        assert len(orders) >= 1
+        orders = parser._extract_from_text(_PROFI_TEXT_SINGLE, "https://profi.ru/test/")
+        assert len(orders) == 1
+        assert orders[0].source == "profi.ru"
         assert orders[0].budget == Decimal("40000")
+        assert orders[0].category == "IT"
+        assert orders[0].published_at.year == 2026
 
-    def test_empty_html_returns_no_orders(self) -> None:
-        """Empty or irrelevant HTML should return an empty list."""
+    def test_extract_multiple_orders(self) -> None:
         parser = ProfiRuParser()
-        soup = BeautifulSoup("<div><p>Nothing here</p></div>", "html.parser")
-        orders = parser._extract_orders(soup)
+        orders = parser._extract_from_text(_PROFI_TEXT_MULTIPLE, "https://profi.ru/test/")
+        assert len(orders) == 3
+        budgets = [o.budget for o in orders]
+        assert Decimal("12000") in budgets
+        assert Decimal("320000") in budgets
+
+    def test_no_budget_returns_none(self) -> None:
+        parser = ProfiRuParser()
+        orders = parser._extract_from_text(_PROFI_TEXT_NO_BUDGET, "https://profi.ru/test/")
+        assert len(orders) == 1
+        assert orders[0].budget is None
+
+    def test_empty_page_returns_no_orders(self) -> None:
+        parser = ProfiRuParser()
+        orders = parser._extract_from_text("Nothing here", "https://profi.ru/test/")
         assert orders == []
 
-    def test_missing_title_skips_order(self) -> None:
-        """An order card without a recognizable title should be skipped."""
-        html = """
-        <div>
-          <div>Детали задачи</div>
-          <div>₽</div>
-        </div>
-        """
+    def test_both_sections_parsed(self) -> None:
+        text = "\nПрямо сейчас ищут\nДистанционно\n· 4 часа назад\nСоздание сайтов\nДетали задачи\nЛендинг. Платформа: Tilda.\nСтоимость\n8000 ₽\nЗадачи, которые доверили Профи.ру\nДистанционно\n· Год назад\nПрограммисты\nДетали задачи\nВеб-разработка. Настройка.\nСтоимость\n1500 ₽\nПохожие страницы\n"
         parser = ProfiRuParser()
-        soup = BeautifulSoup(html, "html.parser")
-        orders = parser._extract_orders(soup)
-        assert orders == []
-
-
-class TestProfiRuParserEdgeCases:
-    """Edge-case tests for ProfiRuParser."""
-
-    def test_multiple_orders_extracted(self) -> None:
-        """Multiple order cards on a page should all be extracted."""
-        parser = ProfiRuParser()
-        soup = BeautifulSoup(_PROFI_RU_MULTIPLE_ORDERS_HTML, "html.parser")
-        orders = parser._extract_orders(soup)
+        orders = parser._extract_from_text(text, "https://profi.ru/test/")
         assert len(orders) >= 2
-        titles = [o.title for o in orders]
-        # At least one should contain "Landing" and one "визитки"
-        assert any("Landing" in t for t in titles)
-        assert any("визитки" in t or "Создание" in t for t in titles)
 
-    def test_extract_budget_with_spaces(self) -> None:
-        """Budget like '40 000 ₽' with spaces should be parsed correctly."""
-        html = """
-        <div>
-          <h4>Test order</h4>
-          <div>Детали задачи</div>
-          <div>Some description text here.</div>
-          <div>Стоимость</div>
-          <div>40 000 ₽</div>
-        </div>
-        """
+    def test_budget_with_spaces(self) -> None:
+        text = "\nПрямо сейчас ищут\nДистанционно\n· вчера\nТестирование\nДетали задачи\nНужен тестировщик.\nСтоимость\n40 000 ₽\nЗаказы за последние\n"
         parser = ProfiRuParser()
-        soup = BeautifulSoup(html, "html.parser")
-        orders = parser._extract_orders(soup)
-        assert len(orders) >= 1
+        orders = parser._extract_from_text(text, "https://profi.ru/test/")
+        assert len(orders) == 1
         assert orders[0].budget == Decimal("40000")
-
-    def test_fallback_extraction_via_cost_marker(self) -> None:
-        """When no 'Детали задачи' marker exists, fallback to 'Стоимость'."""
-        html = """
-        <div>
-          <h4>Разработка сайта</h4>
-          <div>Нужен сайт для бизнеса с каталогом товаров.</div>
-          <div>Стоимость</div>
-          <div>15000 ₽</div>
-        </div>
-        """
-        parser = ProfiRuParser()
-        soup = BeautifulSoup(html, "html.parser")
-        orders = parser._extract_orders(soup)
-        assert len(orders) >= 1
-        assert orders[0].budget == Decimal("15000")
-
-    def test_source_is_profi_ru(self) -> None:
-        """All extracted orders should have source='profi.ru'."""
-        parser = ProfiRuParser()
-        soup = BeautifulSoup(_PROFI_RU_ORDER_HTML, "html.parser")
-        orders = parser._extract_orders(soup)
-        for order in orders:
-            assert order.source == "profi.ru"
-
-    def test_category_is_it(self) -> None:
-        """All extracted orders should have category='IT'."""
-        parser = ProfiRuParser()
-        soup = BeautifulSoup(_PROFI_RU_ORDER_HTML, "html.parser")
-        orders = parser._extract_orders(soup)
-        for order in orders:
-            assert order.category == "IT"
 
 
 # ---------------------------------------------------------------------------

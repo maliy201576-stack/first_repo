@@ -99,6 +99,25 @@ def filter_by_keywords(order: ScrapedOrder, keywords: list[str]) -> list[str]:
     return matched
 
 
+def matches_exclude_keywords(order: ScrapedOrder, exclude: list[str]) -> bool:
+    """Return True if order matches any exclusion keyword.
+
+    Args:
+        order: The scraped order to check.
+        exclude: List of keywords to exclude (case-insensitive).
+
+    Returns:
+        True if the order should be excluded.
+    """
+    if not exclude:
+        return False
+    text = f"{order.title} {order.description}".lower()
+    for kw in exclude:
+        if kw.lower() in text:
+            return True
+    return False
+
+
 class WorkerWeb:
     """Periodic web scraper for FL.ru, Habr Freelance, and zakupki.gov.ru.
 
@@ -119,6 +138,7 @@ class WorkerWeb:
         intervals: dict[str, int] | None = None,
         notifier: Notifier | None = None,
         web_keywords: list[str] | None = None,
+        exclude_keywords: list[str] | None = None,
     ) -> None:
         self._dedup = dedup_service
         self._proxy_pool = proxy_pool
@@ -127,6 +147,7 @@ class WorkerWeb:
         self._intervals = {**_DEFAULT_INTERVALS, **(intervals or {})}
         self._notifier = notifier
         self._web_keywords: list[str] = web_keywords or []
+        self._exclude_keywords: list[str] = exclude_keywords or ["wordpress", "вордпресс", "wp "]
         self._browser = None
         self._tasks: list[asyncio.Task] = []
         self._running = False
@@ -291,6 +312,8 @@ class WorkerWeb:
         """Apply keyword/category filters and store unique leads via DedupService."""
         filtered = []
         for o in orders:
+            if matches_exclude_keywords(o, self._exclude_keywords):
+                continue
             if filter_by_category(o, self._category_filters):
                 matched_kw = filter_by_keywords(o, self._web_keywords)
                 if self._web_keywords and not matched_kw:
