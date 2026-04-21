@@ -1,5 +1,6 @@
 """Unit tests for web parsers — is_urgent_deadline and HTML parsing."""
 
+import re
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
@@ -721,3 +722,44 @@ class TestKworkParser:
         order = parser._parse_item(item)
         assert order is not None
         assert order.source == "kwork.ru"
+
+    def test_extract_budget_price_up_to_format(self) -> None:
+        """'Цена до: 1 500 ₽' should extract 1500."""
+        html = """
+        <div class="want-card">
+          <a class="wants-card__header-title" href="/projects/3154348">
+            Cкачать 100 лучших готовых презентаций
+          </a>
+          <div class="wants-card__description-text">Нужно скачать</div>
+          <div>Цена до: 1 500 ₽</div>
+        </div>
+        """
+        parser = KworkParser()
+        soup = BeautifulSoup(html, "html.parser")
+        item = soup.select_one("div.want-card")
+        assert item is not None
+        order = parser._parse_item(item)
+        assert order is not None
+        assert order.budget == Decimal("1500")
+
+    def test_fallback_parse_from_link(self) -> None:
+        """When no want-card divs exist, parser should find projects via links."""
+        html = """
+        <div>
+          <div>
+            <h1><a href="/projects/100">Тестовый проект</a></h1>
+            <div>Описание тестового проекта для разработки.</div>
+            <div>Желаемый бюджет: до 10 000 ₽</div>
+            <div>Покупатель: test_user</div>
+          </div>
+        </div>
+        """
+        parser = KworkParser()
+        soup = BeautifulSoup(html, "html.parser")
+        link = soup.find("a", href=re.compile(r"/projects/\d+"))
+        assert link is not None
+        order = parser._parse_from_link(link)
+        assert order is not None
+        assert order.title == "Тестовый проект"
+        assert order.budget == Decimal("10000")
+        assert order.url == "https://kwork.ru/projects/100"

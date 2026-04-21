@@ -17,11 +17,11 @@ _KWORK_PROJECTS_URL = "https://kwork.ru/projects"
 _MAX_PAGES = 7
 
 # Regex patterns for budget extraction from card text.
-# "Желаемый бюджет: до 25 000 ₽" or "Цена 500 ₽"
+# "Желаемый бюджет: до 25 000 ₽", "Цена 500 ₽", "Цена до: 1 500 ₽"
 _RE_BUDGET = re.compile(
     r"(?:"
     r"(?:Желаемый\s+бюджет|бюджет)\s*[:]\s*(?:до\s+)?"
-    r"|Цена\s+"
+    r"|Цена\s+(?:до\s*:?\s*)?"
     r")"
     r"([\d\s\xa0]+)"
     r"\s*₽",
@@ -52,8 +52,8 @@ class KworkParser:
             url = _KWORK_PROJECTS_URL if page_num == 1 else f"{_KWORK_PROJECTS_URL}?page={page_num}"
             try:
                 await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-                # Kwork uses JS rendering, wait a bit for content
-                await page.wait_for_timeout(2000)
+                # Kwork uses Vue.js rendering, wait for content
+                await page.wait_for_timeout(3000)
                 html = await page.content()
             except Exception:
                 logger.exception("Failed to load Kwork page %d", page_num)
@@ -61,32 +61,105 @@ class KworkParser:
 
             soup = BeautifulSoup(html, "html.parser")
 
-            # Kwork project cards
+            # Kwork project cards — try multiple strategies
             items = soup.select("div.want-card")
             if not items:
-                # Fallback selectors
                 items = soup.select("div.card__content")
-            if not items:
-                items = soup.select("div[class*='project']")
 
-            if not items:
+            if items:
+                page_count = 0
+                for item in items:
+                    try:
+                        order = self._parse_item(item)
+                        if order is not None:
+                            all_orders.append(order)
+                            page_count += 1
+                    except Exception:
+                        logger.exception("Failed to parse Kwork project item")
+            else:
+                # Fallback: find project links and extract from their containers
+                page_count = 0
+                project_links = soup.find_all(
+                    "a", href=re.compile(r"/projects/\d+")
+                )
+                seen_hrefs: set[str] = set()
+                for link in project_links:
+                    href = str(link.get("href", ""))
+                    if href in seen_hrefs:
+                        continue
+                    seen_hrefs.add(href)
+                    try:
+                        order = self._parse_from_link(link)
+                        if order is not None:
+                            all_orders.append(order)
+                            page_count += 1
+                    except Exception:
+                        logger.exception("Failed to parse Kwork project from link")
+
+            if page_count == 0:
                 logger.info("Kwork: no items on page %d, stopping", page_num)
                 break
-
-            page_count = 0
-            for item in items:
-                try:
-                    order = self._parse_item(item)
-                    if order is not None:
-                        all_orders.append(order)
-                        page_count += 1
-                except Exception:
-                    logger.exception("Failed to parse Kwork project item")
 
             logger.info("Kwork: page %d — parsed %d orders", page_num, page_count)
 
         logger.info("Kwork: total parsed %d orders", len(all_orders))
         return all_orders
+
+    def _parse_from_link(self, link: Tag) -> ScrapedOrder | None:
+        """Extract an order starting from a project link element.
+
+        Walks up the DOM to find the containing card, then extracts
+        title, description, and budget from the card text.
+
+        Args:
+            link: An <a> tag linking to /projects/NNN.
+
+        Returns:
+            A ScrapedOrder if extraction succeeds, None otherwise.
+        """
+        title = link.get_text(strip=True)
+        if not title or len(title) < 3:
+            return None
+
+        href = str(link.get("href", ""))
+        url = f"https://kwork.ru{href}" if not href.startswith("http") else href
+
+        # Walk up to find the card container
+        container = link
+        for _ in range(8):
+            parent = container.parent
+            if parent is None:
+                break
+            container = parent
+            # Stop at a reasonable container level
+            children = list(container.children)
+            if len(children) > 3:
+                break
+
+        # Extract description from nearby text
+        full_text = container.get_text(separator="\n")
+        lines = [ln.strip() for ln in full_text.split("\n") if ln.strip()]
+        desc_lines = [
+            ln for ln in lines
+            if ln != title and len(ln) > 10
+            and "Покупатель" not in ln
+            and "Размещено" not in ln
+            and "Осталось" not in ln
+            and "Предложений" not in ln
+            and "Нанято" not in ln
+        ]
+        description = " ".join(desc_lines[:3]) if desc_lines else ""
+
+        budget = self._extract_budget(container)
+
+        return ScrapedOrder(
+            source="kwork.ru",
+            title=title,
+            description=description,
+            url=url,
+            budget=budget,
+            published_at=datetime.now(timezone.utc),
+        )
 
     def _parse_item(self, item: Tag) -> ScrapedOrder | None:
         """Extract a single order from a Kwork project card."""

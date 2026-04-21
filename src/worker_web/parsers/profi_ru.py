@@ -24,16 +24,20 @@ logger = logging.getLogger(__name__)
 
 # IT-related subcategory pages on profi.ru
 _PROFI_RU_PAGES: list[str] = [
+    "https://profi.ru/it_freelance/programmer/",
     "https://profi.ru/it_freelance/sozdanie-saita/",
     "https://profi.ru/it_freelance/razrabotka-mobilnogo-prilozheniya/",
     "https://profi.ru/it_freelance/web-design/",
     "https://profi.ru/it_freelance/seo/",
     "https://profi.ru/it_freelance/1c/",
     "https://profi.ru/it_freelance/sistemnaya-integraciya/",
+    "https://profi.ru/it_freelance/testirovschiki/",
+    "https://profi.ru/it_freelance/kontekstnaya-reklama/",
+    "https://profi.ru/it_freelance/smm/",
 ]
 
 # Profi.ru is a JS-heavy Next.js app, needs extra wait time
-_JS_RENDER_WAIT_MS = 3000
+_JS_RENDER_WAIT_MS = 5000
 
 
 class ProfiRuParser:
@@ -62,6 +66,10 @@ class ProfiRuParser:
         for url in self._pages:
             try:
                 await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+                # Scroll down to trigger lazy-loading of order sections
+                for _ in range(5):
+                    await page.evaluate("window.scrollBy(0, 1000)")
+                    await page.wait_for_timeout(500)
                 await page.wait_for_timeout(_JS_RENDER_WAIT_MS)
                 html = await page.content()
             except Exception:

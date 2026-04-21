@@ -104,7 +104,7 @@ async def list_leads(
 
             total = (await session.execute(count_query)).scalar_one()
 
-            # Sorting
+            # Sorting — NULLs always go last regardless of direction
             _allowed_sort = {
                 "created_at": Lead.created_at,
                 "discovered_at": Lead.discovered_at,
@@ -113,7 +113,10 @@ async def list_leads(
                 "source": Lead.source,
             }
             sort_col = _allowed_sort.get(sort_by, Lead.created_at)
-            order = sort_col.asc() if sort_dir == "asc" else sort_col.desc()
+            if sort_dir == "asc":
+                order = sort_col.asc().nullslast()
+            else:
+                order = sort_col.desc().nullslast()
 
             offset = (page - 1) * per_page
             query = query.order_by(order).offset(offset).limit(per_page)
