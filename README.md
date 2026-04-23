@@ -1,3 +1,3 @@
 docker compose up -d
 
-UI временно находится на http://localhost:8000/
+UI - http://171.22.120.138:8000/
