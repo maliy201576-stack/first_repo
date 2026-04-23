@@ -55,6 +55,7 @@ def _to_lead_candidate(order: ScrapedOrder) -> LeadCandidate:
         description=order.description,
         url=order.url,
         budget=order.budget,
+        budget_max=order.budget_max,
         category=order.category,
         tags=tags,
         okpd2_codes=order.okpd2_codes,

@@ -17,6 +17,7 @@ class LeadCandidate(BaseModel):
     description: str | None = None
     url: str | None = None
     budget: Decimal | None = None
+    budget_max: Decimal | None = None
     category: str | None = None
     matched_keywords: list[str] = []
     tags: list[str] = []
@@ -36,6 +37,7 @@ class LeadResponse(BaseModel):
     description: str | None = None
     url: str | None = None
     budget: Decimal | None = None
+    budget_max: Decimal | None = None
     category: str | None = None
     matched_keywords: list[str]
     tags: list[str]

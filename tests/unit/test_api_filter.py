@@ -61,6 +61,7 @@ def lead_data(draw: st.DrawFn) -> dict[str, Any]:
         "description": None,
         "url": None,
         "budget": None,
+        "budget_max": None,
         "category": None,
         "matched_keywords": [],
         "tags": draw(_tags),

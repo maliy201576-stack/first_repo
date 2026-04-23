@@ -47,6 +47,7 @@ def _fake_lead(
     lead.description = None
     lead.url = None
     lead.budget = None
+    lead.budget_max = None
     lead.category = None
     lead.matched_keywords = []
     lead.tags = tags or []

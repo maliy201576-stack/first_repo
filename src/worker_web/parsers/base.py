@@ -33,6 +33,7 @@ class ScrapedOrder:
     description: str
     url: str
     budget: Decimal | None = None
+    budget_max: Decimal | None = None
     category: str | None = None
     published_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     # Fields specific to government procurement

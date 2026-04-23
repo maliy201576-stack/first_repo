@@ -22,6 +22,7 @@ def _lead_to_response(lead: Lead) -> LeadResponse:
         description=lead.description,
         url=lead.url,
         budget=lead.budget,
+        budget_max=lead.budget_max,
         category=lead.category,
         matched_keywords=lead.matched_keywords,
         tags=lead.tags,

@@ -662,3 +662,34 @@ class TestKworkParser:
         assert order.title == "Тестовый проект"
         assert order.budget == Decimal("10000")
         assert order.url == "https://kwork.ru/projects/100"
+
+    def test_extract_budget_max(self) -> None:
+        """'Допустимый: до 75 000 ₽' should be extracted as budget_max."""
+        html = """
+        <div class="want-card">
+          <a class="wants-card__header-title" href="/projects/200">
+            Проект с диапазоном
+          </a>
+          <div class="wants-card__description-text">Описание</div>
+          <div>Желаемый бюджет: до 25 000 ₽ Допустимый: до 75 000 ₽</div>
+        </div>
+        """
+        parser = KworkParser()
+        soup = BeautifulSoup(html, "html.parser")
+        item = soup.select_one("div.want-card")
+        assert item is not None
+        order = parser._parse_item(item)
+        assert order is not None
+        assert order.budget == Decimal("25000")
+        assert order.budget_max == Decimal("75000")
+
+    def test_fixed_price_no_budget_max(self) -> None:
+        """Fixed price 'Цена 500 ₽' should have budget_max=None."""
+        parser = KworkParser()
+        soup = BeautifulSoup(_KWORK_FIXED_PRICE_HTML, "html.parser")
+        item = soup.select_one("div.want-card")
+        assert item is not None
+        order = parser._parse_item(item)
+        assert order is not None
+        assert order.budget == Decimal("500")
+        assert order.budget_max is None

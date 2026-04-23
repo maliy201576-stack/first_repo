@@ -196,6 +196,7 @@ Object.keys(SL).map(s=>
 '<td class="dt">'+fd(l.discovered_at)+'</td>'+
 '</tr>'}}).join('')}}
 function budgetCell(l){{
+if(l.budget&&l.budget_max)return '<span class="bud">'+Number(l.budget).toLocaleString("ru-RU")+' \\u2013 '+Number(l.budget_max).toLocaleString("ru-RU")+' {rub}</span>';
 if(l.budget)return '<span class="bud">'+Number(l.budget).toLocaleString("ru-RU")+' {rub}</span>';
 return '<span class="bud-na">\\u041F\\u043E \\u0434\\u043E\\u0433\\u043E\\u0432\\u043E\\u0440\\u0451\\u043D\\u043D\\u043E\\u0441\\u0442\\u0438</span>'}}
 function labelsCell(l){{

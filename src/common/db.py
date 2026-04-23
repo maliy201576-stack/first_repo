@@ -42,6 +42,7 @@ class Lead(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     budget: Mapped[float | None] = mapped_column(Numeric(15, 2), nullable=True)
+    budget_max: Mapped[float | None] = mapped_column(Numeric(15, 2), nullable=True)
     category: Mapped[str | None] = mapped_column(String(100), nullable=True)
     matched_keywords: Mapped[list] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")

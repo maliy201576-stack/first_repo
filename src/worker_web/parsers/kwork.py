@@ -27,6 +27,11 @@ _RE_BUDGET = re.compile(
     r"\s*₽",
     re.IGNORECASE,
 )
+# "Допустимый: до 150 000 ₽"
+_RE_BUDGET_MAX = re.compile(
+    r"Допустимый\s*[:]\s*(?:до\s+)?([\d\s\xa0]+)\s*₽",
+    re.IGNORECASE,
+)
 # Fallback: any number followed by ₽
 _RE_PRICE_SIMPLE = re.compile(r"([\d\s\xa0]+)\s*₽")
 
@@ -151,7 +156,7 @@ class KworkParser:
         description = " ".join(desc_lines[:3]) if desc_lines else ""
         description = clean_description(description)
 
-        budget = self._extract_budget(container)
+        budget, budget_max = self._extract_budget_pair(container)
 
         return ScrapedOrder(
             source="kwork.ru",
@@ -159,6 +164,7 @@ class KworkParser:
             description=description,
             url=url,
             budget=budget,
+            budget_max=budget_max,
             published_at=datetime.now(timezone.utc),
         )
 
@@ -187,7 +193,7 @@ class KworkParser:
         description = desc_tag.get_text(strip=True) if desc_tag else ""
         description = clean_description(description)
 
-        budget = self._extract_budget(item)
+        budget, budget_max = self._extract_budget_pair(item)
 
         return ScrapedOrder(
             source="kwork.ru",
@@ -195,26 +201,27 @@ class KworkParser:
             description=description,
             url=url,
             budget=budget,
+            budget_max=budget_max,
             published_at=datetime.now(timezone.utc),
         )
 
     @staticmethod
-    def _extract_budget(item: Tag) -> Decimal | None:
-        """Extract budget from a Kwork project card.
+    def _extract_budget_pair(item: Tag) -> tuple[Decimal | None, Decimal | None]:
+        """Extract budget and budget_max from a Kwork project card.
 
-        Kwork renders budget in two formats within the card text:
-        - "Желаемый бюджет: до 25 000 ₽" (desired budget)
-        - "Цена 500 ₽" (fixed price)
-
-        The method first tries CSS selectors for the price element,
-        then falls back to regex search over the full card text.
+        Returns a tuple of (desired_budget, max_budget).
+        Kwork shows: "Желаемый бюджет: до 25 000 ₽ Допустимый: до 75 000 ₽"
+        or just "Цена 500 ₽".
 
         Args:
             item: The card DOM element.
 
         Returns:
-            Budget as Decimal, or None if not found.
+            Tuple of (budget, budget_max). Either or both may be None.
         """
+        budget: Decimal | None = None
+        budget_max: Decimal | None = None
+
         # Strategy 1: Try dedicated price element (legacy selectors)
         price_tag = item.select_one("div.wants-card__header-price")
         if price_tag is None:
@@ -222,20 +229,28 @@ class KworkParser:
         if price_tag is not None:
             result = _parse_price_text(price_tag.get_text(strip=True))
             if result is not None:
-                return result
+                return result, None
 
         # Strategy 2: Search full card text for budget/price patterns
         full_text = item.get_text()
+
         match = _RE_BUDGET.search(full_text)
         if match:
-            return _parse_price_text(match.group(1))
+            budget = _parse_price_text(match.group(1))
+
+        match_max = _RE_BUDGET_MAX.search(full_text)
+        if match_max:
+            budget_max = _parse_price_text(match_max.group(1))
+
+        if budget is not None:
+            return budget, budget_max
 
         # Strategy 3: Fallback — first occurrence of "N ₽"
         match = _RE_PRICE_SIMPLE.search(full_text)
         if match:
-            return _parse_price_text(match.group(1))
+            return _parse_price_text(match.group(1)), None
 
-        return None
+        return None, None
 
 
 def _parse_price_text(text: str) -> Decimal | None:
