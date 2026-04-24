@@ -37,19 +37,8 @@ _PROFI_RU_PAGES: list[str] = [
 ]
 
 _JS_RENDER_WAIT_MS = 5000
-
-# Regex to split rendered text into individual order blocks.
-# Each order starts with "Дистанционно" or a location name followed by a date.
-_RE_ORDER_BLOCK = re.compile(
-    r"(?:Дистанционно|[А-Яа-яЁё]+)\s*\n"
-    r"\s*·\s*(.+?)\n"           # date line
-    r"\s*\n?"
-    r"\s*(.+?)\n"               # category/service name (title)
-    r"\s*Детали задачи\s*\n"    # marker
-    r"([\s\S]+?)"               # description block
-    r"(?=(?:Дистанционно|[А-Яа-яЁё]+)\s*\n\s*·|\Z)",
-    re.MULTILINE,
-)
+_GOTO_TIMEOUT_MS = 60_000
+_MAX_PAGE_RETRIES = 2
 
 # Months for date parsing
 _MONTHS_RU = {
@@ -92,17 +81,30 @@ class ProfiRuParser:
         seen_titles: set[str] = set()
 
         for url in self._pages:
-            try:
-                await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-                # Scroll to trigger lazy-loading of order sections
-                for _ in range(8):
-                    await page.evaluate("window.scrollBy(0, 800)")
-                    await page.wait_for_timeout(400)
-                await page.wait_for_timeout(_JS_RENDER_WAIT_MS)
-                # Get rendered text — much more reliable than HTML parsing
-                text = await page.inner_text("body")
-            except Exception:
-                logger.exception("Failed to load Profi.ru page: %s", url)
+            text: str | None = None
+            for attempt in range(1, _MAX_PAGE_RETRIES + 1):
+                try:
+                    await page.goto(url, wait_until="domcontentloaded", timeout=_GOTO_TIMEOUT_MS)
+                    # Scroll to trigger lazy-loading of order sections
+                    for _ in range(8):
+                        await page.evaluate("window.scrollBy(0, 800)")
+                        await page.wait_for_timeout(400)
+                    await page.wait_for_timeout(_JS_RENDER_WAIT_MS)
+                    # Get rendered text — much more reliable than HTML parsing
+                    text = await page.inner_text("body")
+                    break
+                except Exception:
+                    if attempt == _MAX_PAGE_RETRIES:
+                        logger.exception(
+                            "Failed to load Profi.ru page after %d attempts: %s",
+                            _MAX_PAGE_RETRIES, url,
+                        )
+                    else:
+                        logger.warning(
+                            "Profi.ru page load attempt %d/%d timed out: %s",
+                            attempt, _MAX_PAGE_RETRIES, url,
+                        )
+            if text is None:
                 continue
 
             page_orders = self._extract_from_text(text, url)
@@ -183,7 +185,7 @@ class ProfiRuParser:
             body = parts[i]
 
             try:
-                order = self._parse_single(header, body, page_url)
+                order = self._parse_single(header, body)
                 if order is not None:
                     orders.append(order)
             except Exception:
@@ -192,14 +194,13 @@ class ProfiRuParser:
         return orders
 
     def _parse_single(
-        self, header: str, body: str, page_url: str
+        self, header: str, body: str,
     ) -> ScrapedOrder | None:
         """Parse a single order from header (before 'Детали задачи') and body (after).
 
         Args:
             header: Text before the 'Детали задачи' marker.
             body: Text after the 'Детали задачи' marker.
-            page_url: Source page URL.
 
         Returns:
             A ScrapedOrder, or None if parsing fails.
@@ -253,7 +254,7 @@ class ProfiRuParser:
             source="profi.ru",
             title=title,
             description=description,
-            url=page_url,
+            url=None,
             budget=budget,
             category="IT",
             published_at=published_at,

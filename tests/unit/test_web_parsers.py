@@ -9,7 +9,6 @@ from bs4 import BeautifulSoup
 
 from src.worker_web.parsers.base import ScrapedOrder, is_urgent_deadline
 from src.worker_web.parsers.fl_ru import FlRuParser
-from src.worker_web.parsers.habr_freelance import HabrFreelanceParser
 from src.worker_web.parsers.kwork import KworkParser
 from src.worker_web.parsers.profi_ru import ProfiRuParser
 from src.worker_web.parsers.zakupki_gov import ZakupkiGovParser
@@ -116,47 +115,6 @@ class TestFlRuParser:
         parser = FlRuParser()
         soup = BeautifulSoup('<div class="b-post"><p>no link</p></div>', "html.parser")
         item = soup.select_one("div.b-post")
-        assert item is not None
-        assert parser._parse_item(item) is None
-
-
-# ---------------------------------------------------------------------------
-# HabrFreelanceParser HTML parsing tests
-# ---------------------------------------------------------------------------
-
-
-_HABR_HTML = """
-<li class="content-list__item">
-  <div class="task__title"><a href="/task/456">Design a logo</a></div>
-  <div class="task__description">Need a modern logo</div>
-  <span class="count">15 000 ₽</span>
-  <span class="tags__item_link">Дизайн</span>
-  <span class="params__published-at">
-    <time datetime="2024-06-10T10:00:00+03:00">10 июня</time>
-  </span>
-</li>
-"""
-
-
-class TestHabrFreelanceParser:
-    def test_parse_item_extracts_fields(self) -> None:
-        parser = HabrFreelanceParser()
-        soup = BeautifulSoup(_HABR_HTML, "html.parser")
-        item = soup.select_one("li.content-list__item")
-        assert item is not None
-        order = parser._parse_item(item)
-        assert order is not None
-        assert order.source == "habr_freelance"
-        assert order.title == "Design a logo"
-        assert order.description == "Need a modern logo"
-        assert order.url == "https://freelance.habr.com/task/456"
-        assert order.budget == Decimal("15000")
-        assert order.category == "Дизайн"
-
-    def test_parse_item_missing_title_returns_none(self) -> None:
-        parser = HabrFreelanceParser()
-        soup = BeautifulSoup('<li class="content-list__item"><p>x</p></li>', "html.parser")
-        item = soup.select_one("li.content-list__item")
         assert item is not None
         assert parser._parse_item(item) is None
 
@@ -300,51 +258,6 @@ class TestFlRuParserEdgeCases:
         assert orders[1].title == "Second Project"
         assert orders[2].title == "Third Project"
         assert orders[2].budget is None  # third has no price
-
-
-# ---------------------------------------------------------------------------
-# HabrFreelanceParser — edge-case HTML parsing tests
-# ---------------------------------------------------------------------------
-
-_HABR_NO_BUDGET_HTML = """
-<li class="content-list__item">
-  <div class="task__title"><a href="/task/500">Task Without Budget</a></div>
-  <div class="task__description">Description here</div>
-  <span class="tags__item_link">Разработка</span>
-</li>
-"""
-
-_HABR_NO_DESCRIPTION_HTML = """
-<li class="content-list__item">
-  <div class="task__title"><a href="/task/501">Task Without Description</a></div>
-  <span class="count">5 000 ₽</span>
-  <span class="tags__item_link">Тестирование</span>
-</li>
-"""
-
-
-class TestHabrFreelanceParserEdgeCases:
-    def test_missing_budget_returns_none_budget(self) -> None:
-        parser = HabrFreelanceParser()
-        soup = BeautifulSoup(_HABR_NO_BUDGET_HTML, "html.parser")
-        item = soup.select_one("li.content-list__item")
-        assert item is not None
-        order = parser._parse_item(item)
-        assert order is not None
-        assert order.budget is None
-        assert order.title == "Task Without Budget"
-        assert order.description == "Description here"
-
-    def test_missing_description_returns_empty_string(self) -> None:
-        parser = HabrFreelanceParser()
-        soup = BeautifulSoup(_HABR_NO_DESCRIPTION_HTML, "html.parser")
-        item = soup.select_one("li.content-list__item")
-        assert item is not None
-        order = parser._parse_item(item)
-        assert order is not None
-        assert order.description == ""
-        assert order.budget == Decimal("5000")
-        assert order.title == "Task Without Description"
 
 
 # ---------------------------------------------------------------------------

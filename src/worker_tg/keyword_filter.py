@@ -1,7 +1,6 @@
-"""Keyword filtering for Telegram messages.
+"""Keyword filtering for Telegram messages."""
 
-Provides case-insensitive keyword matching against message text.
-"""
+from __future__ import annotations
 
 
 def filter_message(text: str, keywords: list[str]) -> list[str]:

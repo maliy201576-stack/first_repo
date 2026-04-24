@@ -199,11 +199,11 @@ class TestWorkerWebLifecycle:
         browser = _make_mock_browser(_make_mock_context(_make_mock_page()))
         factory = AsyncMock(return_value=browser)
 
-        intervals = {"fl_ru": 100, "habr": 200, "zakupki": 300}
+        intervals = {"fl_ru": 100, "kwork": 200, "zakupki": 300}
         worker = WorkerWeb(dedup, pool, factory, intervals=intervals)
 
         assert worker._intervals["fl_ru"] == 100
-        assert worker._intervals["habr"] == 200
+        assert worker._intervals["kwork"] == 200
         assert worker._intervals["zakupki"] == 300
 
         # Cleanup (no start needed)
@@ -322,8 +322,8 @@ class TestWorkerWebScraping:
 
 class TestWorkerWebErrorHandling:
     @pytest.mark.asyncio
-    async def test_timeout_marks_proxy_and_retries(self) -> None:
-        """Playwright timeout triggers proxy block and retry."""
+    async def test_timeout_triggers_retry(self) -> None:
+        """Playwright timeout triggers a retry via _retry_with_new_proxy."""
         dedup = _make_dedup()
         pool = _make_proxy_pool()
         page = _make_mock_page()
@@ -331,12 +331,10 @@ class TestWorkerWebErrorHandling:
         browser = _make_mock_browser(context)
         factory = AsyncMock(return_value=browser)
 
-        worker = WorkerWeb(dedup, pool, factory)
+        worker = WorkerWeb(dedup, pool, factory, vpn_proxy_url="http://squid:3128")
         worker._browser = browser
 
-        # First call raises TimeoutError, retry returns empty
         call_count = 0
-        original_parse = worker._fl_parser.parse
 
         async def side_effect(p):
             nonlocal call_count
@@ -350,7 +348,8 @@ class TestWorkerWebErrorHandling:
         result = await worker.scrape_fl_ru()
 
         assert result == []
-        pool.mark_blocked.assert_awaited()
+        # Retry should have been attempted (parser called twice)
+        assert call_count == 2
 
     @pytest.mark.asyncio
     async def test_general_exception_returns_empty(self) -> None:
@@ -380,16 +379,13 @@ class TestWorkerWebErrorHandling:
         browser = _make_mock_browser(context)
         factory = AsyncMock(return_value=browser)
 
-        worker = WorkerWeb(dedup, pool, factory)
+        worker = WorkerWeb(dedup, pool, factory, vpn_proxy_url="http://squid:3128")
         worker._browser = browser
 
-        # First parse raises timeout, then get_next raises NoAvailableProxiesError
+        # Parse raises timeout; retry with pool also fails
         worker._fl_parser.parse = AsyncMock(side_effect=TimeoutError("timeout"))
         pool.get_next = AsyncMock(
-            side_effect=[
-                "http://proxy1:8080",  # first call in _scrape_source
-                NoAvailableProxiesError("all blocked"),  # retry call
-            ]
+            side_effect=NoAvailableProxiesError("all blocked"),
         )
 
         result = await worker.scrape_fl_ru()
@@ -403,19 +399,16 @@ class TestWorkerWebErrorHandling:
 
 class TestIsUrgentDeadline:
     def test_delegates_to_base_function(self) -> None:
-        dedup = _make_dedup()
-        pool = _make_proxy_pool()
-        factory = AsyncMock()
-        worker = WorkerWeb(dedup, pool, factory)
+        from src.worker_web.parsers.base import is_urgent_deadline
 
         # A deadline far in the future should not be urgent
         far_future = datetime(2099, 12, 31, tzinfo=timezone.utc)
-        assert worker.is_urgent_deadline(far_future) is False
+        assert is_urgent_deadline(far_future) is False
 
         # A deadline tomorrow should be urgent
         from datetime import timedelta
         tomorrow = datetime.now(timezone.utc) + timedelta(days=1)
-        assert worker.is_urgent_deadline(tomorrow) is True
+        assert is_urgent_deadline(tomorrow) is True
 
 
 # ---------------------------------------------------------------------------
@@ -426,12 +419,12 @@ class TestIsUrgentDeadline:
 class TestWorkerWebHttp429Handling:
     """Tests for HTTP 429 (Too Many Requests) handling.
 
-    Validates: Requirements 2.4 — HTTP 429 causes 300s pause and proxy switch.
+    Validates: Requirements 2.4 — HTTP 429 causes 300s pause.
     """
 
     @pytest.mark.asyncio
-    async def test_http_429_pauses_and_switches_proxy(self) -> None:
-        """HTTP 429 triggers a 300s pause and marks the proxy as blocked."""
+    async def test_http_429_pauses(self) -> None:
+        """HTTP 429 triggers a 300s pause and returns empty list."""
         dedup = _make_dedup()
         pool = _make_proxy_pool()
         page = _make_mock_page()
@@ -439,20 +432,16 @@ class TestWorkerWebHttp429Handling:
         browser = _make_mock_browser(context)
         factory = AsyncMock(return_value=browser)
 
-        worker = WorkerWeb(dedup, pool, factory)
+        worker = WorkerWeb(dedup, pool, factory, vpn_proxy_url="http://squid:3128")
         worker._browser = browser
 
-        # Parser raises _Http429Error
         worker._fl_parser.parse = AsyncMock(side_effect=_Http429Error("429"))
 
         with patch("src.worker_web.worker.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
             result = await worker.scrape_fl_ru()
 
         assert result == []
-        # Verify 300s pause was triggered
         mock_sleep.assert_awaited_once_with(300)
-        # Verify proxy was marked as blocked
-        pool.mark_blocked.assert_awaited_once_with("http://proxy1:8080")
 
     @pytest.mark.asyncio
     async def test_http_429_returns_empty_list(self) -> None:
@@ -479,28 +468,24 @@ class TestWorkerWebHttp429Handling:
 class TestWorkerWebHttp403Handling:
     """Tests for HTTP 403 (Forbidden) handling.
 
-    Validates: Requirements 2.5 — HTTP 403 marks proxy as blocked and retries with new proxy.
+    Validates: Requirements 2.5 — HTTP 403 triggers retry.
     """
 
     @pytest.mark.asyncio
-    async def test_http_403_marks_proxy_and_retries(self) -> None:
-        """HTTP 403 marks the current proxy as blocked and retries with a new one."""
+    async def test_http_403_retries(self) -> None:
+        """HTTP 403 triggers a retry that can succeed."""
         orders_on_retry = [_make_order(source="fl.ru", url="https://fl.ru/retry")]
         dedup = _make_dedup(is_duplicate=False)
         pool = _make_proxy_pool()
-        # get_next returns different proxies on successive calls
-        pool.get_next = AsyncMock(
-            side_effect=["http://proxy1:8080", "http://proxy2:8080"]
-        )
+        pool.get_next = AsyncMock(return_value="http://proxy2:8080")
         page = _make_mock_page()
         context = _make_mock_context(page)
         browser = _make_mock_browser(context)
         factory = AsyncMock(return_value=browser)
 
-        worker = WorkerWeb(dedup, pool, factory)
+        worker = WorkerWeb(dedup, pool, factory, vpn_proxy_url="http://squid:3128")
         worker._browser = browser
 
-        # First call raises _Http403Error, retry succeeds
         call_count = 0
 
         async def parse_side_effect(p):
@@ -514,15 +499,13 @@ class TestWorkerWebHttp403Handling:
 
         result = await worker.scrape_fl_ru()
 
-        # Proxy1 should be marked as blocked
-        pool.mark_blocked.assert_awaited_once_with("http://proxy1:8080")
         # Retry should have succeeded with orders
         assert len(result) == 1
         assert result[0].url == "https://fl.ru/retry"
 
     @pytest.mark.asyncio
     async def test_http_403_retry_with_no_proxies_returns_empty(self) -> None:
-        """When no proxies available for retry after 403, returns empty list."""
+        """When no proxies available for retry after 403, still retries with VPN proxy."""
         dedup = _make_dedup()
         pool = _make_proxy_pool()
         page = _make_mock_page()
@@ -530,37 +513,30 @@ class TestWorkerWebHttp403Handling:
         browser = _make_mock_browser(context)
         factory = AsyncMock(return_value=browser)
 
-        worker = WorkerWeb(dedup, pool, factory)
+        worker = WorkerWeb(dedup, pool, factory, vpn_proxy_url="http://squid:3128")
         worker._browser = browser
-        worker._zakupki_parser.parse = AsyncMock(side_effect=_Http403Error("forbidden"))
+        # Both attempts fail with 403
+        worker._fl_parser.parse = AsyncMock(side_effect=_Http403Error("forbidden"))
 
-        # First get_next succeeds, retry get_next raises NoAvailableProxiesError
         pool.get_next = AsyncMock(
-            side_effect=[
-                "http://proxy1:8080",
-                NoAvailableProxiesError("all blocked"),
-            ]
+            side_effect=NoAvailableProxiesError("all blocked"),
         )
 
-        result = await worker.scrape_zakupki()
-
+        result = await worker.scrape_fl_ru()
         assert result == []
-        pool.mark_blocked.assert_awaited_once_with("http://proxy1:8080")
 
     @pytest.mark.asyncio
     async def test_http_403_retry_failure_returns_empty(self) -> None:
         """When retry after 403 also fails, returns empty list."""
         dedup = _make_dedup()
         pool = _make_proxy_pool()
-        pool.get_next = AsyncMock(
-            side_effect=["http://proxy1:8080", "http://proxy2:8080"]
-        )
+        pool.get_next = AsyncMock(return_value="http://proxy2:8080")
         page = _make_mock_page()
         context = _make_mock_context(page)
         browser = _make_mock_browser(context)
         factory = AsyncMock(return_value=browser)
 
-        worker = WorkerWeb(dedup, pool, factory)
+        worker = WorkerWeb(dedup, pool, factory, vpn_proxy_url="http://squid:3128")
         worker._browser = browser
 
         # Both attempts fail
@@ -569,6 +545,96 @@ class TestWorkerWebHttp403Handling:
         )
 
         result = await worker.scrape_profi_ru()
-
         assert result == []
-        pool.mark_blocked.assert_awaited_once_with("http://proxy1:8080")
+
+
+# ---------------------------------------------------------------------------
+# Proxy routing (split traffic) tests
+# ---------------------------------------------------------------------------
+
+
+class TestProxyRouting:
+    """Tests for split-traffic proxy routing.
+
+    Russian sites (profi.ru, zakupki_gov) use direct_proxy dict,
+    other sites use vpn_proxy_url.
+    """
+
+    def test_vpn_source_gets_vpn_proxy(self) -> None:
+        """fl.ru (non-direct source) should use the VPN proxy."""
+        worker = WorkerWeb(
+            _make_dedup(), _make_proxy_pool(), AsyncMock(),
+            vpn_proxy_url="http://squid:3128",
+            direct_proxy={"server": "http://ru-proxy:8080", "username": "u", "password": "p"},
+        )
+        result = worker._proxy_for_source("fl.ru")
+        assert result == {"server": "http://squid:3128"}
+
+    def test_direct_source_gets_direct_proxy_with_auth(self) -> None:
+        """zakupki_gov (direct source) should use the direct proxy with auth."""
+        worker = WorkerWeb(
+            _make_dedup(), _make_proxy_pool(), AsyncMock(),
+            vpn_proxy_url="http://squid:3128",
+            direct_proxy={"server": "http://ru-proxy:8080", "username": "u", "password": "p"},
+        )
+        result = worker._proxy_for_source("zakupki_gov")
+        assert result == {"server": "http://ru-proxy:8080", "username": "u", "password": "p"}
+
+    def test_profi_ru_no_longer_direct_source(self) -> None:
+        """profi.ru is accessible from Europe — should NOT use direct proxy."""
+        worker = WorkerWeb(
+            _make_dedup(), _make_proxy_pool(), AsyncMock(),
+            vpn_proxy_url="http://vpn:3128",
+            direct_proxy={"server": "http://ru-proxy:8080"},
+        )
+        result = worker._proxy_for_source("profi.ru")
+        assert result == {"server": "http://vpn:3128"}
+
+    def test_direct_source_no_proxy_when_not_set(self) -> None:
+        """When direct_proxy is None, direct sources get no proxy."""
+        worker = WorkerWeb(
+            _make_dedup(), _make_proxy_pool(), AsyncMock(),
+            vpn_proxy_url="http://squid:3128",
+            direct_proxy=None,
+        )
+        result = worker._proxy_for_source("zakupki_gov")
+        assert result is None
+
+    def test_vpn_source_no_proxy_when_not_set(self) -> None:
+        """When vpn_proxy_url is None, VPN sources get no proxy."""
+        worker = WorkerWeb(
+            _make_dedup(), _make_proxy_pool(), AsyncMock(),
+            vpn_proxy_url=None,
+        )
+        result = worker._proxy_for_source("fl.ru")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_scrape_uses_correct_proxy_per_source(self) -> None:
+        """Verify browser.new_context is called with the right proxy for each source."""
+        dedup = _make_dedup(is_duplicate=False)
+        pool = _make_proxy_pool()
+        page = _make_mock_page()
+        context = _make_mock_context(page)
+        browser = _make_mock_browser(context)
+        factory = AsyncMock(return_value=browser)
+
+        direct = {"server": "http://ru-proxy:8080", "username": "u", "password": "p"}
+        worker = WorkerWeb(
+            dedup, pool, factory,
+            vpn_proxy_url="http://squid:3128",
+            direct_proxy=direct,
+        )
+        worker._browser = browser
+
+        # Scrape fl.ru (VPN source)
+        worker._fl_parser.parse = AsyncMock(return_value=[])
+        await worker.scrape_fl_ru()
+        browser.new_context.assert_awaited_with(proxy={"server": "http://squid:3128"})
+
+        browser.new_context.reset_mock()
+
+        # Scrape zakupki (direct source)
+        worker._zakupki_parser.parse = AsyncMock(return_value=[])
+        await worker.scrape_zakupki()
+        browser.new_context.assert_awaited_with(proxy=direct)

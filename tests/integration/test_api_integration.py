@@ -53,7 +53,7 @@ async def seeded_db(session_factory):
             discovered_at=datetime(2024, 7, 4, tzinfo=timezone.utc),
         ),
         dict(
-            source="habr_freelance",
+            source="kwork.ru",
             title="Data pipeline project",
             matched_keywords=["python"],
             tags=[],

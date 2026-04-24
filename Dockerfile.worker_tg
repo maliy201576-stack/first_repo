@@ -17,7 +17,7 @@ COPY --from=builder /install /usr/local
 COPY src/__init__.py src/__init__.py
 COPY src/common/ src/common/
 COPY src/dedup/ src/dedup/
-COPY src/notifier/ src/notifier/
 COPY src/worker_tg/ src/worker_tg/
+COPY scripts/tg_auth.py scripts/tg_auth.py
 
 CMD ["python", "-m", "src.worker_tg"]

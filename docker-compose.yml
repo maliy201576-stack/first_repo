@@ -18,17 +18,6 @@ services:
       retries: 5
     restart: unless-stopped
 
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
   api:
     build:
       context: .
@@ -36,13 +25,10 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://glukhov:${POSTGRES_PASSWORD:-nNICz0f45ex88SI}@postgres:5432/glukhov_sales
-      REDIS_URL: redis://redis:6379/0
     ports:
       - "8000:8000"
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -55,32 +41,28 @@ services:
         max_attempts: 5
     restart: on-failure
 
-  # worker_tg:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile.worker_tg
-  #   env_file: .env
-  #   environment:
-  #     DATABASE_URL: postgresql+asyncpg://glukhov:${POSTGRES_PASSWORD:-nNICz0f45ex88SI}@postgres:5432/glukhov_sales
-  #     REDIS_URL: redis://redis:6379/0
-  #     TG_CHANNELS_CONFIG: /config/channels.yaml
-  #   volumes:
-  #     - ./config:/config:ro
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #   healthcheck:
-  #     test: ["CMD", "python", "-c", "print('ok')"]
-  #     interval: 30s
-  #     timeout: 5s
-  #     retries: 5
-  #   deploy:
-  #     restart_policy:
-  #       condition: on-failure
-  #       max_attempts: 5
-  #   restart: on-failure
+  worker_tg:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker_tg
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://glukhov:${POSTGRES_PASSWORD:-nNICz0f45ex88SI}@postgres:5432/glukhov_sales
+      TG_CHANNELS_CONFIG: /config/channels.yaml
+      TG_SESSION_STRING: ${TG_SESSION_STRING:-}
+    volumes:
+      - ./config:/config:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 256M
+    restart: on-failure
 
   worker_web:
     build:
@@ -89,56 +71,43 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://glukhov:${POSTGRES_PASSWORD:-nNICz0f45ex88SI}@postgres:5432/glukhov_sales
-      REDIS_URL: redis://redis:6379/0
       PROXY_LIST_PATH: /config/proxies.txt
       TG_CHANNELS_CONFIG: /config/channels.yaml
-      SCRAPER_PROXY_URL: http://squid:3128
+      SCRAPER_PROXY_URL: ${SCRAPER_PROXY_URL:-}
+      # zakupki.gov.ru blocks foreign IPs — needs a proxy with Russian IP.
+      # profi.ru works directly from Germany.
+      SCRAPER_DIRECT_PROXY_URL: ${SCRAPER_DIRECT_PROXY_URL:-}
+      SCRAPER_DIRECT_PROXY_USER: ${SCRAPER_DIRECT_PROXY_USER:-}
+      SCRAPER_DIRECT_PROXY_PASS: ${SCRAPER_DIRECT_PROXY_PASS:-}
     volumes:
       - ./config:/config:ro
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
-      squid:
-        condition: service_started
-    healthcheck:
-      test: ["CMD", "python", "-c", "print('ok')"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
     deploy:
       restart_policy:
         condition: on-failure
         max_attempts: 5
+      resources:
+        limits:
+          memory: 1G
     restart: on-failure
 
-  squid:
-    image: ubuntu/squid:latest
+  # ── One-time Telegram authorization ──────────────────────────
+  # Usage: docker compose run --rm tg-auth
+  # Prompts for phone + code, saves TG_SESSION_STRING into .env.
+  # After that, regular `docker compose up -d` just works.
+  tg-auth:
+    profiles: ["auth"]
+    build:
+      context: .
+      dockerfile: Dockerfile.worker_tg
+    env_file: .env
     volumes:
-      - ./config/squid.conf:/etc/squid/squid.conf:ro
-    healthcheck:
-      test: ["CMD-SHELL", "squid -k check || exit 0"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
-
-  # notifier:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile.notifier
-  #   env_file: .env
-  #   healthcheck:
-  #     test: ["CMD", "python", "-c", "print('ok')"]
-  #     interval: 30s
-  #     timeout: 5s
-  #     retries: 5
-  #   deploy:
-  #     restart_policy:
-  #       condition: on-failure
-  #       max_attempts: 5
-  #   restart: on-failure
+      - ./.env:/app/.env
+    entrypoint: ["python", "scripts/tg_auth.py"]
+    stdin_open: true
+    tty: true
 
 volumes:
   pgdata:

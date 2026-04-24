@@ -30,18 +30,15 @@ def _load_web_keywords(config_path: str) -> list[str]:
 
 
 async def _create_browser():
-    """Launch a Playwright Chromium browser instance with proxy support."""
+    """Launch a Playwright Chromium browser without a browser-level proxy.
+
+    Proxy routing is handled per-context inside WorkerWeb so that
+    Russian sites (profi.ru, zakupki.gov.ru) can bypass the VPN proxy.
+    """
     from playwright.async_api import async_playwright
 
-    settings = get_settings()
     pw = await async_playwright().start()
-
-    launch_kwargs: dict = {"headless": True}
-    if settings.SCRAPER_PROXY_URL:
-        launch_kwargs["proxy"] = {"server": settings.SCRAPER_PROXY_URL}
-        logger.info("Playwright browser using proxy: %s", settings.SCRAPER_PROXY_URL)
-
-    return await pw.chromium.launch(**launch_kwargs)
+    return await pw.chromium.launch(headless=True)
 
 
 async def main() -> None:
@@ -55,19 +52,19 @@ async def main() -> None:
     engine = create_engine(settings.DATABASE_URL)
     session_factory = create_session_factory(engine)
 
-    try:
-        from redis.asyncio import Redis
-
-        redis = Redis.from_url(settings.REDIS_URL)
-    except Exception:
-        logger.warning("Redis unavailable, running without cache")
-        redis = None
-
-    dedup = DedupService(session_factory, redis=redis, fuzzy_threshold=settings.DEDUP_FUZZY_THRESHOLD)
-    proxy_pool = ProxyPool.from_file(settings.PROXY_LIST_PATH, redis=redis)
+    dedup = DedupService(session_factory, fuzzy_threshold=settings.DEDUP_FUZZY_THRESHOLD)
+    proxy_pool = ProxyPool.from_file(settings.PROXY_LIST_PATH)
 
     web_keywords = _load_web_keywords(settings.TG_CHANNELS_CONFIG)
     logger.info("Loaded %d web keywords for filtering", len(web_keywords))
+
+    # Build direct proxy config (separate fields for Playwright compatibility)
+    direct_proxy: dict[str, str] | None = None
+    if settings.SCRAPER_DIRECT_PROXY_URL:
+        direct_proxy = {"server": settings.SCRAPER_DIRECT_PROXY_URL}
+        if settings.SCRAPER_DIRECT_PROXY_USER:
+            direct_proxy["username"] = settings.SCRAPER_DIRECT_PROXY_USER
+            direct_proxy["password"] = settings.SCRAPER_DIRECT_PROXY_PASS
 
     worker = WorkerWeb(
         dedup_service=dedup,
@@ -75,11 +72,11 @@ async def main() -> None:
         browser_factory=_create_browser,
         intervals={
             "fl_ru": settings.WEB_SCRAPE_INTERVAL_FL,
-            "habr": settings.WEB_SCRAPE_INTERVAL_HABR,
             "zakupki": settings.WEB_SCRAPE_INTERVAL_ZAKUPKI,
         },
-        notifier=None,
         web_keywords=web_keywords,
+        vpn_proxy_url=settings.SCRAPER_PROXY_URL or None,
+        direct_proxy=direct_proxy,
     )
 
     stop_event = asyncio.Event()
@@ -94,8 +91,6 @@ async def main() -> None:
     finally:
         await worker.stop()
         await engine.dispose()
-        if redis is not None:
-            await redis.aclose()
 
 
 if __name__ == "__main__":

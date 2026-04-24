@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from bs4 import BeautifulSoup, Tag
 
 from src.worker_web.parsers.base import ScrapedOrder, clean_description
+
+from src.common.budget import parse_price_text
 
 logger = logging.getLogger(__name__)
 
@@ -103,15 +105,8 @@ class FlRuParser:
         budget_tag = item.select_one("div.b-post__price")
         if budget_tag is None:
             return None
-        text = budget_tag.get_text(strip=True).replace("\xa0", "").replace(" ", "")
-        # Remove currency symbols and non-numeric suffixes
-        digits = "".join(ch for ch in text if ch.isdigit() or ch == ".")
-        if not digits:
-            return None
-        try:
-            return Decimal(digits)
-        except InvalidOperation:
-            return None
+        text = budget_tag.get_text(strip=True)
+        return parse_price_text(text)
 
     @staticmethod
     def _extract_category(item: Tag) -> str | None:

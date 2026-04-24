@@ -1,20 +1,21 @@
 """FastAPI application with lifespan for database connection management."""
 
+from __future__ import annotations
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from src.common.config import get_settings
-from src.common.db import create_engine, create_session_factory
-
 from src.api.routes.health import router as health_router
 from src.api.routes.leads import router as leads_router
 from src.api.routes.ui import router as ui_router
+from src.common.config import get_settings
+from src.common.db import create_engine, create_session_factory
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage async engine lifecycle: create on startup, dispose on shutdown."""
+    """Create async engine on startup, dispose on shutdown."""
     settings = get_settings()
     if not settings.DATABASE_URL:
         raise RuntimeError("API missing required env var: DATABASE_URL")

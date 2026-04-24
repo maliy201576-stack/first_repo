@@ -1,56 +1,56 @@
 """Application configuration loaded from environment variables via Pydantic Settings."""
 
+from __future__ import annotations
+
+from functools import lru_cache
+
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     """Central configuration for all Glukhov Sales Engine services.
 
-    Fields that are only needed by specific services (TG_API_ID, TG_API_HASH,
-    NOTIFIER_BOT_TOKEN, NOTIFIER_CHAT_ID) default to empty/zero so that
-    services which don't use them can start without providing values.
-    Each service's __main__ validates the fields it actually requires.
+    Service-specific fields (TG_API_ID, TG_API_HASH) default to
+    empty/zero so that services which don't need them can start
+    without providing values.  Each service's ``__main__`` validates
+    the fields it actually requires.
     """
 
     # Database
     DATABASE_URL: str = ""
 
-    # Redis
-    REDIS_URL: str = "redis://redis:6379/0"
-
     # Telegram (Telethon) — required only by worker_tg
     TG_API_ID: int = 0
     TG_API_HASH: str = ""
     TG_SESSION_NAME: str = "worker_tg"
+    TG_SESSION_STRING: str = ""  # Telethon StringSession — portable, no file needed
     TG_CHANNELS_CONFIG: str = "/config/channels.yaml"
 
     # Web scraping intervals (seconds)
     WEB_SCRAPE_INTERVAL_FL: int = 900
-    WEB_SCRAPE_INTERVAL_HABR: int = 900
     WEB_SCRAPE_INTERVAL_ZAKUPKI: int = 3600
 
     # Proxy
     PROXY_LIST_PATH: str = "/config/proxies.txt"
+    # VPN proxy — not needed when server has direct access to target sites.
+    # Set only if Telegram or other non-Russian sites require a proxy.
     SCRAPER_PROXY_URL: str = ""
+    # Proxy with Russian IP for zakupki.gov.ru (blocks foreign traffic).
+    # profi.ru works fine without a proxy from Europe.
+    SCRAPER_DIRECT_PROXY_URL: str = ""
+    SCRAPER_DIRECT_PROXY_USER: str = ""
+    SCRAPER_DIRECT_PROXY_PASS: str = ""
 
     # Deduplication
     DEDUP_FUZZY_THRESHOLD: int = 85
 
-    # Notifier — uses Telethon (same TG_API_ID/TG_API_HASH as worker_tg)
-    # No separate bot token needed; alerts go to Saved Messages.
-
     # Logging
     LOG_LEVEL: str = "INFO"
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
-_settings: Settings | None = None
-
-
+@lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """Create and return a cached Settings instance from environment variables."""
-    global _settings  # noqa: PLW0603
-    if _settings is None:
-        _settings = Settings()  # type: ignore[call-arg]
-    return _settings
+    """Return a cached Settings instance loaded from environment variables."""
+    return Settings()  # type: ignore[call-arg]

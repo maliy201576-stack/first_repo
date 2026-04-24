@@ -1,1 +1,1 @@
-
+"""Telegram channel monitoring worker."""

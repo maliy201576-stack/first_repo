@@ -5,11 +5,13 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from bs4 import BeautifulSoup, Tag
 
 from src.worker_web.parsers.base import ScrapedOrder, clean_description
+
+from src.common.budget import parse_price_text
 
 logger = logging.getLogger(__name__)
 
@@ -227,7 +229,7 @@ class KworkParser:
         if price_tag is None:
             price_tag = item.select_one("span[class*='price']")
         if price_tag is not None:
-            result = _parse_price_text(price_tag.get_text(strip=True))
+            result = parse_price_text(price_tag.get_text(strip=True))
             if result is not None:
                 return result, None
 
@@ -236,11 +238,11 @@ class KworkParser:
 
         match = _RE_BUDGET.search(full_text)
         if match:
-            budget = _parse_price_text(match.group(1))
+            budget = parse_price_text(match.group(1))
 
         match_max = _RE_BUDGET_MAX.search(full_text)
         if match_max:
-            budget_max = _parse_price_text(match_max.group(1))
+            budget_max = parse_price_text(match_max.group(1))
 
         if budget is not None:
             return budget, budget_max
@@ -248,25 +250,6 @@ class KworkParser:
         # Strategy 3: Fallback — first occurrence of "N ₽"
         match = _RE_PRICE_SIMPLE.search(full_text)
         if match:
-            return _parse_price_text(match.group(1)), None
+            return parse_price_text(match.group(1)), None
 
         return None, None
-
-
-def _parse_price_text(text: str) -> Decimal | None:
-    """Parse a price string like '25 000' or '500' into a Decimal.
-
-    Args:
-        text: Raw price text, possibly with spaces and non-breaking spaces.
-
-    Returns:
-        Decimal value, or None if parsing fails.
-    """
-    cleaned = text.replace("\xa0", "").replace(" ", "").replace(",", ".")
-    digits = "".join(ch for ch in cleaned if ch.isdigit() or ch == ".")
-    if not digits:
-        return None
-    try:
-        return Decimal(digits)
-    except InvalidOperation:
-        return None

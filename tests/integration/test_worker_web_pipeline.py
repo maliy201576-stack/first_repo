@@ -23,8 +23,8 @@ from src.worker_web.worker import WorkerWeb, filter_by_category, _to_lead_candid
 
 @pytest_asyncio.fixture()
 async def dedup(session_factory):
-    """DedupService wired to the real test database, no Redis."""
-    return DedupService(session_factory=session_factory, redis=None)
+    """DedupService wired to the real test database."""
+    return DedupService(session_factory=session_factory)
 
 
 def _make_order(

@@ -22,7 +22,6 @@ RUN playwright install --with-deps chromium
 COPY src/__init__.py src/__init__.py
 COPY src/common/ src/common/
 COPY src/dedup/ src/dedup/
-COPY src/notifier/ src/notifier/
 COPY src/worker_web/ src/worker_web/
 
 CMD ["python", "-m", "src.worker_web"]

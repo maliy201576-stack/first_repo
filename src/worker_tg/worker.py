@@ -14,7 +14,6 @@ from telethon import TelegramClient, events
 
 from src.common.models import LeadCandidate
 from src.dedup.service import DedupService
-from src.notifier.service import Notifier
 from src.worker_tg.config_loader import ConfigLoader
 from src.worker_tg.keyword_filter import filter_message
 
@@ -49,13 +48,11 @@ class WorkerTG:
         dedup_service: DedupService,
         config_loader: ConfigLoader,
         config_reload_interval: int = 60,
-        notifier: Notifier | None = None,
     ) -> None:
         self._client = client
         self._dedup = dedup_service
         self._config_loader = config_loader
         self._config_reload_interval = config_reload_interval
-        self._notifier = notifier
         self._running = False
         self._reload_task: asyncio.Task | None = None
 
@@ -67,10 +64,17 @@ class WorkerTG:
         attempt = 0
         while True:
             try:
-                await self._client.start()
+                await self._client.connect()
+                if not await self._client.is_user_authorized():
+                    raise RuntimeError(
+                        "Telegram session not authorized. "
+                        "Run 'python scripts/tg_auth.py' locally first to create a session file."
+                    )
                 logger.info("Connected to Telegram")
                 attempt = 0
                 break
+            except RuntimeError:
+                raise
             except Exception as exc:
                 delay = compute_backoff(attempt)
                 logger.warning(
@@ -143,10 +147,6 @@ class WorkerTG:
         # Extract source info
         chat = await event.get_chat()
         channel_name = getattr(chat, "username", None) or str(chat.id)
-        author = ""
-        if message.sender:
-            sender = await message.get_sender()
-            author = getattr(sender, "username", "") or getattr(sender, "first_name", "") or ""
 
         # Filter by keywords
         matched = filter_message(text, config.keywords)
@@ -183,13 +183,8 @@ class WorkerTG:
                 )
             else:
                 logger.info("Lead created from channel=%s", channel_name)
-        except Exception as exc:
+        except Exception:
             logger.exception("Error storing lead from channel=%s", channel_name)
-            if self._notifier is not None:
-                try:
-                    await self._notifier.send_error("worker_tg", exc)
-                except Exception:
-                    logger.exception("Failed to send notifier alert")
 
     async def _periodic_reload(self) -> None:
         """Periodically check for config file changes."""

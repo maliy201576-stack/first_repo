@@ -1,5 +1,7 @@
 """Structured JSON logging with mandatory fields: timestamp, service_name, level, message."""
 
+from __future__ import annotations
+
 import json
 import logging
 import sys

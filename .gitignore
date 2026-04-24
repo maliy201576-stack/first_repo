@@ -31,3 +31,6 @@ Thumbs.db
 
 # Kiro
 .kiro/
+
+# Telethon session (contains auth tokens)
+*.session

@@ -1,6 +1,8 @@
-"""SQLAlchemy 2.0 async models and database engine factory."""
+"""SQLAlchemy 2.0 async ORM models and database engine/session factories."""
 
-from datetime import datetime, timezone
+from __future__ import annotations
+
+from datetime import datetime
 
 from sqlalchemy import (
     DateTime,
@@ -13,22 +15,23 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-
-from src.common.enums import LeadStatus
 from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from src.common.enums import LeadStatus
+
 
 class Base(DeclarativeBase):
-    pass
+    """Declarative base for all ORM models."""
 
 
 class Lead(Base):
-    """SQLAlchemy model for the leads table."""
+    """SQLAlchemy model for the ``leads`` table."""
 
     __tablename__ = "leads"
 
@@ -45,10 +48,10 @@ class Lead(Base):
     budget_max: Mapped[float | None] = mapped_column(Numeric(15, 2), nullable=True)
     category: Mapped[str | None] = mapped_column(String(100), nullable=True)
     matched_keywords: Mapped[list] = mapped_column(
-        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+        JSONB, nullable=False, server_default=text("'[]'::jsonb"),
     )
     tags: Mapped[list] = mapped_column(
-        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+        JSONB, nullable=False, server_default=text("'[]'::jsonb"),
     )
     status: Mapped[str] = mapped_column(
         Enum(
@@ -61,24 +64,14 @@ class Lead(Base):
         server_default=text("'new'"),
     )
     okpd2_codes: Mapped[list | None] = mapped_column(JSONB, nullable=True)
-    max_contract_price: Mapped[float | None] = mapped_column(
-        Numeric(15, 2), nullable=True
-    )
-    submission_deadline: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    discovered_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    max_contract_price: Mapped[float | None] = mapped_column(Numeric(15, 2), nullable=True)
+    submission_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=text("NOW()"),
+        DateTime(timezone=True), nullable=False, server_default=text("NOW()"),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=text("NOW()"),
+        DateTime(timezone=True), nullable=False, server_default=text("NOW()"),
     )
 
     __table_args__ = (
@@ -92,7 +85,7 @@ class Lead(Base):
 
 
 class LeadHash(Base):
-    """SQLAlchemy model for the lead_hashes table."""
+    """SQLAlchemy model for the ``lead_hashes`` table."""
 
     __tablename__ = "lead_hashes"
 
@@ -103,14 +96,12 @@ class LeadHash(Base):
         nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=text("NOW()"),
+        DateTime(timezone=True), nullable=False, server_default=text("NOW()"),
     )
 
 
-def create_engine(database_url: str):
-    """Create an async SQLAlchemy engine from a database URL.
+def create_engine(database_url: str) -> AsyncEngine:
+    """Create an async SQLAlchemy engine.
 
     Args:
         database_url: PostgreSQL connection string
@@ -128,13 +119,13 @@ def create_engine(database_url: str):
     )
 
 
-def create_session_factory(engine) -> async_sessionmaker[AsyncSession]:
-    """Create an async session factory bound to the given engine.
+def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
+    """Create an async session factory bound to *engine*.
 
     Args:
         engine: An ``AsyncEngine`` returned by :func:`create_engine`.
 
     Returns:
-        An ``async_sessionmaker`` that produces ``AsyncSession`` instances.
+        An ``async_sessionmaker`` producing ``AsyncSession`` instances.
     """
     return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

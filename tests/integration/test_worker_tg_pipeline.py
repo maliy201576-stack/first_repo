@@ -22,8 +22,8 @@ from src.worker_tg.worker import WorkerTG
 
 @pytest_asyncio.fixture()
 async def dedup(session_factory):
-    """DedupService wired to the real test database, no Redis."""
-    return DedupService(session_factory=session_factory, redis=None)
+    """DedupService wired to the real test database."""
+    return DedupService(session_factory=session_factory)
 
 
 @pytest_asyncio.fixture()
@@ -40,7 +40,6 @@ async def worker(dedup):
         client=client,
         dedup_service=dedup,
         config_loader=config_loader,
-        notifier=None,
     )
 
 

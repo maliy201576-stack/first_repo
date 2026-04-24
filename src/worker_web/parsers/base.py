@@ -28,7 +28,7 @@ _NOISE_RE = re.compile(
 class ScrapedOrder:
     """Unified data structure for orders scraped from web sources."""
 
-    source: str  # "fl.ru" | "habr_freelance" | "zakupki_gov"
+    source: str  # "fl.ru" | "kwork.ru" | "weblancer.net" | "profi.ru" | "zakupki_gov"
     title: str
     description: str
     url: str

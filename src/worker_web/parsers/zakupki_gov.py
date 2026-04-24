@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from bs4 import BeautifulSoup, Tag
 
 from src.worker_web.parsers.base import ScrapedOrder, is_urgent_deadline
 
+from src.common.budget import parse_price_text
+
 logger = logging.getLogger(__name__)
+
+_GOTO_TIMEOUT_MS = 60_000
+_MAX_PAGE_RETRIES = 2
 
 # Target OKPD2 codes for IT services
 TARGET_OKPD2_CODES = [
@@ -40,12 +45,25 @@ class ZakupkiGovParser:
             List of scraped orders matching target OKPD2 codes.
         """
         orders: list[ScrapedOrder] = []
-        try:
-            search_url = self._build_search_url()
-            await page.goto(search_url, wait_until="domcontentloaded", timeout=30_000)
-            html = await page.content()
-        except Exception:
-            logger.exception("Failed to load zakupki.gov.ru search results")
+        search_url = self._build_search_url()
+        html: str | None = None
+        for attempt in range(1, _MAX_PAGE_RETRIES + 1):
+            try:
+                await page.goto(search_url, wait_until="load", timeout=_GOTO_TIMEOUT_MS)
+                html = await page.content()
+                break
+            except Exception:
+                if attempt == _MAX_PAGE_RETRIES:
+                    logger.exception(
+                        "Failed to load zakupki.gov.ru search results after %d attempts",
+                        _MAX_PAGE_RETRIES,
+                    )
+                else:
+                    logger.warning(
+                        "zakupki.gov.ru load attempt %d/%d timed out",
+                        attempt, _MAX_PAGE_RETRIES,
+                    )
+        if html is None:
             return orders
 
         soup = BeautifulSoup(html, "html.parser")
@@ -117,14 +135,7 @@ class ZakupkiGovParser:
         price_tag = item.select_one("div.price-block__value")
         if price_tag is None:
             return None
-        text = price_tag.get_text(strip=True).replace("\xa0", "").replace(" ", "").replace(",", ".")
-        digits = "".join(ch for ch in text if ch.isdigit() or ch == ".")
-        if not digits:
-            return None
-        try:
-            return Decimal(digits)
-        except InvalidOperation:
-            return None
+        return parse_price_text(price_tag.get_text(strip=True))
 
     @staticmethod
     def _extract_deadline(item: Tag) -> datetime | None:

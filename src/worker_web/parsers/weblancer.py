@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from bs4 import BeautifulSoup, Tag
 
 from src.worker_web.parsers.base import ScrapedOrder
+
+from src.common.budget import parse_price_text
 
 logger = logging.getLogger(__name__)
 
@@ -120,14 +122,10 @@ class WeblancerParser:
     @staticmethod
     def _extract_budget_from_container(container: Tag) -> Decimal | None:
         """Extract budget from the container surrounding a job listing."""
-        # Look for dollar/ruble amounts in the container text
         for tag in container.find_all(string=True):
             text = str(tag).strip()
             if "$" in text or "₽" in text or "руб" in text.lower() or "грн" in text.lower():
-                digits = "".join(ch for ch in text if ch.isdigit() or ch == ".")
-                if digits:
-                    try:
-                        return Decimal(digits)
-                    except InvalidOperation:
-                        continue
+                result = parse_price_text(text)
+                if result is not None:
+                    return result
         return None

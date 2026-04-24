@@ -1,8 +1,7 @@
 """Deduplication service — two-level duplicate detection for leads.
 
-Level 1: Exact hash check in Redis (O(1)).
+Level 1: Exact hash check in PostgreSQL (indexed primary key lookup).
 Level 2: Fuzzy title comparison in PostgreSQL via RapidFuzz.
-Fallback: when Redis is unavailable, hash check falls back to PostgreSQL only.
 """
 
 from __future__ import annotations
@@ -10,21 +9,19 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from rapidfuzz import fuzz
-from redis.asyncio import Redis
-from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from src.common.constants import DEDUP_WINDOW_DAYS
 from src.common.db import Lead, LeadHash
 from src.common.enums import LeadStatus
 from src.common.models import LeadCandidate
 
 logger = logging.getLogger(__name__)
-
-_HASH_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 days
 
 
 @dataclass
@@ -38,16 +35,14 @@ class DeduplicationResult:
 
 
 class DedupService:
-    """Two-level lead deduplication with Redis + PostgreSQL."""
+    """Two-level lead deduplication using PostgreSQL only."""
 
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession],
-        redis: Redis | None = None,
         fuzzy_threshold: int = 85,
     ) -> None:
         self._session_factory = session_factory
-        self._redis = redis
         self._fuzzy_threshold = fuzzy_threshold
 
     # ------------------------------------------------------------------
@@ -70,43 +65,18 @@ class DedupService:
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     # ------------------------------------------------------------------
-    # Exact duplicate (Redis, with PostgreSQL fallback)
+    # Exact duplicate (PostgreSQL)
     # ------------------------------------------------------------------
 
     async def check_exact_duplicate(self, hash_value: str) -> bool:
-        """Return ``True`` if *hash_value* already exists.
-
-        Checks Redis first; falls back to PostgreSQL when Redis is
-        unavailable.
-        """
-        # Try Redis
-        if self._redis is not None:
-            try:
-                exists = await self._redis.exists(f"lead:hash:{hash_value}")
-                return bool(exists)
-            except RedisError:
-                logger.warning("Redis unavailable, falling back to PostgreSQL for hash check")
-
-        # Fallback — PostgreSQL
+        """Return ``True`` if *hash_value* already exists in PostgreSQL."""
         async with self._session_factory() as session:
             stmt = select(LeadHash.hash).where(LeadHash.hash == hash_value).limit(1)
             result = await session.execute(stmt)
             return result.scalar_one_or_none() is not None
 
     async def _store_hash(self, hash_value: str, lead_id: UUID, session: AsyncSession) -> None:
-        """Persist *hash_value* in both Redis and PostgreSQL."""
-        # Redis
-        if self._redis is not None:
-            try:
-                await self._redis.set(
-                    f"lead:hash:{hash_value}",
-                    str(lead_id),
-                    ex=_HASH_TTL_SECONDS,
-                )
-            except RedisError:
-                logger.warning("Redis unavailable, hash stored in PostgreSQL only")
-
-        # PostgreSQL
+        """Persist *hash_value* in PostgreSQL."""
         lead_hash = LeadHash(hash=hash_value, lead_id=str(lead_id))
         session.add(lead_hash)
 
@@ -130,9 +100,7 @@ class DedupService:
         Returns a :class:`DeduplicationResult` indicating whether a
         duplicate was found (similarity ≥ threshold).
         """
-        from datetime import datetime, timedelta, timezone
-
-        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=DEDUP_WINDOW_DAYS)
         async with self._session_factory() as session:
             stmt = (
                 select(Lead.id, Lead.title)
@@ -163,7 +131,7 @@ class DedupService:
 
         Steps:
         1. Compute SHA-256 hash from (source, url/message_id).
-        2. Check exact duplicate via Redis (fallback to PostgreSQL).
+        2. Check exact duplicate in PostgreSQL.
         3. If new hash — check fuzzy duplicate in PostgreSQL.
         4. If unique — INSERT lead and persist hash.
         """
@@ -206,6 +174,7 @@ class DedupService:
                     description=candidate.description,
                     url=candidate.url,
                     budget=candidate.budget,
+                    budget_max=candidate.budget_max,
                     category=candidate.category,
                     matched_keywords=candidate.matched_keywords,
                     tags=candidate.tags,

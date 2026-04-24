@@ -1,5 +1,8 @@
 """Lead CRUD endpoints with filtering and pagination."""
 
+from __future__ import annotations
+
+import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -10,6 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from src.common.db import Lead
 from src.common.models import LeadListResponse, LeadResponse, LeadUpdateRequest
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -131,6 +135,7 @@ async def list_leads(
                 per_page=per_page,
             )
     except SQLAlchemyError:
+        logger.exception("Database error listing leads")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -148,6 +153,7 @@ async def get_lead(request: Request, lead_id: UUID) -> LeadResponse:
     except HTTPException:
         raise
     except SQLAlchemyError:
+        logger.exception("Database error fetching lead %s", lead_id)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -171,6 +177,7 @@ async def update_lead(
     except HTTPException:
         raise
     except SQLAlchemyError:
+        logger.exception("Database error updating lead %s", lead_id)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -207,4 +214,5 @@ async def filter_options(request: Request) -> dict:
                 "categories": categories,
             }
     except SQLAlchemyError:
+        logger.exception("Database error fetching filter options")
         raise HTTPException(status_code=500, detail="Internal server error")

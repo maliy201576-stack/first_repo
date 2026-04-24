@@ -4,6 +4,8 @@ from enum import Enum
 
 
 class LeadStatus(str, Enum):
+    """Lifecycle status of a lead."""
+
     NEW = "new"
     VIEWED = "viewed"
     IN_PROGRESS = "in_progress"
@@ -11,13 +13,18 @@ class LeadStatus(str, Enum):
 
 
 class LeadSource(str, Enum):
+    """Known lead sources."""
+
     TELEGRAM = "telegram"
     FL_RU = "fl.ru"
-    HABR_FREELANCE = "habr_freelance"
+    KWORK = "kwork.ru"
+    WEBLANCER = "weblancer.net"
     ZAKUPKI_GOV = "zakupki_gov"
     PROFI_RU = "profi.ru"
 
 
 class LeadTag(str, Enum):
+    """Priority tags for leads."""
+
     URGENT = "urgent"
     NORMAL = "normal"

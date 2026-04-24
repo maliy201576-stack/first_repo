@@ -1,6 +1,6 @@
 """Shared fixtures for integration tests.
 
-Provides PostgreSQL and Redis containers via testcontainers,
+Provides PostgreSQL containers via testcontainers,
 plus pre-configured SQLAlchemy session factories and DedupService instances.
 """
 
