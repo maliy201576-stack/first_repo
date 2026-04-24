@@ -1,9 +1,8 @@
 channels:
-  - "@kadrof"
+  - "@kadrof_work"
   - "@distantsiya"
-  - "@pro_rust"
-  - "@django_jobs"
-  - "@moscow_progers"
+  - "@FreeVacanciesIT"
+  - "@freelansim_ru"
 
 keywords:
   - "разработка"
